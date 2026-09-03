@@ -1,15 +1,22 @@
 # pvclust-py
 
-Hierarchical clustering with AU *p*-values via multiscale bootstrap resampling — a
+Hierarchical clustering with Approximately Unbiased (AU) *p*-values via multiscale bootstrap resampling — a
 Python port of the R package [pvclust](https://cran.r-project.org/package=pvclust) —
-and its **federated** form, in which several projects contribute to one clustering
-without any of them sharing subject-level data.
+and designed with the idea of doing **project** specific analysis followed by **federated** analysis.
+
+Federation is a privacy preserving architecture where data does not move, and the value of **N** is increased by aggregation.  
+
+**pvclust** obtains randomness as follows:
+1. resampling of rows — draw n' = r·n rows with replacement
+2. recluster,
+3. tally which clusters reappeared.
+4. these clusters are reflected in the dendrograms.
 
 > **Status: early. Not yet usable.** The multiscale curve fit (`msfit`) is ported and
 > matches R exactly. The clustering, bootstrap, CLI, and federation layers are not
 > written yet. See [Status](#status).
 
-## Why this exists
+## Backgrownd
 
 The ordinary bootstrap probability (BP) — *"this cluster appeared in 87% of bootstrap
 trees"* — is a **biased** measure of support, and biased in the dangerous direction: it
@@ -39,7 +46,7 @@ zero. That is why the multiscale bootstrap needs several sample sizes at all, an
 pvclust 2.2-0 also returns **SI**, the selective-inference *p*-value of Terada &
 Shimodaira, built on the selection probability `d0 = Φ(-c)`. This port carries all three.
 
-## What gets clustered, and what gets resampled
+## Clustering and resampling
 
 pvclust's dendrogram is over the **columns**; the bootstrap resamples the **rows**. The
 asymmetry is the design, not an accident:
@@ -62,7 +69,7 @@ exchangeable draws:
 
 The package warns rather than silently returning an `AU = 0.98` that means nothing.
 
-## Fidelity to R
+## remaining faithful to the original Shamidora and Suzuki R implementation of pvclust
 
 Numerical agreement with R is the entire value proposition, so this is a **line-by-line
 port against the R source**, not a reimplementation from the papers. `msfit` is
