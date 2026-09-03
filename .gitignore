@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Vendored upstream R source: fetched on demand by scripts/fetch_reference.sh,
+# never committed -- it is someone else's GPL code and a committed copy goes stale.
+reference/
+
+# Nextflow (the sibling workflow repos)
+work/
+.nextflow*
+results/
+timeline-*.html
+trace-*.txt
+dag-*.html
+
+# macOS
+.DS_Store

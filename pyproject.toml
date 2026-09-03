@@ -1,0 +1,37 @@
+[project]
+name = "pvclust-py"
+version = "0.1.0"
+description = "Hierarchical clustering with AU p-values via multiscale bootstrap, and its federated form"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+  { name = "Anne Deslattes Mays, PhD", email = "adeslat@scitechcon.org" },
+]
+requires-python = ">=3.9"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+]
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+# NOTE: typer / matplotlib / plotly land with cli.py and plot.py, together with the
+# [project.scripts] entry point. Left out until those modules exist so that an
+# install of this package always yields a working `pvclust-py` command or none.
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
