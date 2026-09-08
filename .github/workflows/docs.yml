@@ -1,0 +1,82 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Sphinx
+        run: pip install sphinx myst-parser sphinx-rtd-theme
+
+      # NOTE: sphinx-apidoc is deliberately NOT used.
+      #
+      # `sphinx-apidoc -o docs/source src/pvclust_py` generates a modules.rst and a
+      # package page, so the reader clicks index -> modules -> pvclust_py -> module
+      # before reaching any documentation. docs/source/api/*.rst instead names each
+      # module explicitly and index.rst links to them directly: one click.
+      #
+      # The cost is that a NEW MODULE needs a new file in docs/source/api/ and a line
+      # in the index toctree. The check below fails the build if one is forgotten,
+      # so the flat layout cannot silently go stale.
+      - name: Every module has a documentation page
+        run: |
+          missing=0
+          for f in src/pvclust_py/*.py; do
+            m=$(basename "$f" .py)
+            [ "$m" = "__init__" ] && continue
+            if [ ! -f "docs/source/api/$m.rst" ]; then
+              echo "::error::src/pvclust_py/$m.py has no docs/source/api/$m.rst"
+              missing=1
+            elif ! grep -q "api/$m" docs/source/index.rst; then
+              echo "::error::docs/source/api/$m.rst is not in the index toctree"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Build HTML docs
+        run: cd docs && make html SPHINXOPTS="-W --keep-going"
+
+      - name: Verify build succeeded
+        run: test -f docs/build/html/index.html
+
+      - name: Create .nojekyll
+        run: touch docs/build/html/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs/build/html'
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

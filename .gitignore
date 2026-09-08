@@ -22,3 +22,26 @@ dag-*.html
 
 # macOS
 .DS_Store
+
+# Study data: fetched, never committed. See README for sources.
+data/
+
+# Analysis outputs. Every command writes to the working directory, so running one
+# from the repo root leaves artifacts here; they are results, not source.
+*_edges.csv
+*_counts.csv
+*_diagnostics.csv
+*_features.csv
+*_labels.txt
+*_stats.npz
+*_dendrogram.*
+*_heatmap_*.*
+*_from-federated_*.csv
+federated_*.csv
+federated_*.json
+*.json
+!ipynb/*.ipynb
+
+# Derived cohort splits, written by the walkthrough
+*_abundance.csv
+*_metadata.csv

@@ -1,0 +1,13 @@
+name: pvclust-py
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy=2.3.*
+  - pandas=2.3.*
+  - scikit-learn=1.7.*
+  - scipy=1.17.*
+  - matplotlib-base=3.10.*
+  - typer
+  - jupyterlab
+  - pip

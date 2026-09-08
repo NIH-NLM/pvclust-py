@@ -3,7 +3,7 @@ name = "pvclust-py"
 version = "0.1.0"
 description = "Hierarchical clustering with AU p-values via multiscale bootstrap, and its federated form"
 readme = "README.md"
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
 authors = [
   { name = "Anne Deslattes Mays, PhD", email = "adeslat@scitechcon.org" },
 ]
@@ -12,26 +12,40 @@ dependencies = [
   "numpy",
   "pandas",
   "scipy",
+  "scikit-learn",   # k-means path in core.kmeans_pv
+  "matplotlib",     # dendrograms and heatmaps
+  "typer",          # CLI
 ]
+license-files = ["LICENSE"]
 classifiers = [
-  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 
-# NOTE: typer / matplotlib / plotly land with cli.py and plot.py, together with the
-# [project.scripts] entry point. Left out until those modules exist so that an
-# install of this package always yields a working `pvclust-py` command or none.
+[project.scripts]
+pvclust-py = "pvclust_py.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest"]
+notebooks = ["jupyter", "matplotlib"]
+combat = ["inmoose"]   # ComBat batch correction (adjust.combat)
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]  # PEP 639 SPDX license expressions
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+pvclust_py = ["data/*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Our own guards, firing where a test deliberately provokes them; each is asserted in
+# the test that owns it. Silencing them here keeps an UNEXPECTED warning visible.
+filterwarnings = [
+    "ignore:only .* resampling units:UserWarning",
+    "ignore:exact member-set matching recovered no cluster:UserWarning",
+    "ignore:clustering rows means resampling:UserWarning",
+]
