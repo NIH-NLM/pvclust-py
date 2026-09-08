@@ -5,10 +5,6 @@ Python port of the R package [pvclust](https://cran.r-project.org/package=pvclus
 and its **federated** form, in which several projects contribute to one clustering
 without any of them sharing subject-level data.
 
-> **Status: early. Not yet usable.** The multiscale curve fit (`msfit`) is ported and
-> matches R exactly. The clustering, bootstrap, CLI, and federation layers are not
-> written yet. See [Status](#status).
-
 ## Why this exists
 
 The ordinary bootstrap probability (BP) — *"this cluster appeared in 87% of bootstrap
@@ -39,15 +35,15 @@ zero. That is why the multiscale bootstrap needs several sample sizes at all, an
 pvclust 2.2-0 also returns **SI**, the selective-inference *p*-value of Terada &
 Shimodaira, built on the selection probability `d0 = Φ(-c)`. This port carries all three.
 
-## What gets clustered, and what gets resampled
+## Clustering and resampling
 
-pvclust's dendrogram is over the **columns**; the bootstrap resamples the **rows**. The
-asymmetry is the design, not an accident:
+pvclust's dendrogram is over the **columns**; the bootstrap resamples the **rows**.
+
+Working with transformed data allows both initial columns and rows to be appropriately clustered.
 
 - objects clustered = columns (distance between columns, computed across rows)
 - resampling units = rows
-- AU answers: *"drawing another sample of n rows from the same population, would this
-  cluster of columns reappear?"*
+- Approximately Unbiased (AU)
 
 Clustering the other orientation means transposing, which is supported — but it is not
 statistically free. The bootstrap is only meaningful if the resampling units are
@@ -60,7 +56,7 @@ exchangeable draws:
 | cell clusters × genes | cell types | genes | ⚠️ same caveat |
 | cell clusters × genes | genes | ~30 cell clusters | ⚠️ too few resampling units |
 
-The package warns rather than silently returning an `AU = 0.98` that means nothing.
+The package warns rather than silently returning an `AU = 0.98` when there is co-expression
 
 ## Fidelity to R
 
