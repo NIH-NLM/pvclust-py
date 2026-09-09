@@ -18,9 +18,11 @@ Three comparisons, all local:
                  recovers alone, cophenetic correlation, and adjusted Rand between the
                  two partitions.
 
-  MODULE SCORES  each federated cluster reduced to one score per sample, so the
-                 project can carry a federation-validated feature space into whatever
-                 it does next -- clustering its own patients, say.
+  MODULE SCORES  the tightest well-supported federated clusters, each reduced to one
+                 score per sample, so the project can carry a federation-validated
+                 feature space into whatever it does next -- clustering its own patients,
+                 say. Modules are non-overlapping; anything in none of them is kept as
+                 itself, so the space is a reduction of the original, not a copy.
 
 Nothing here needs other projects' data. It reads the federated artifacts, which carry
 only cluster memberships and fitted p-values.
@@ -52,8 +54,10 @@ def apply_edges(X, federated_edges, *, method_dist: str = "correlation",
         alpha: threshold for counting a cluster as supported.
 
     Returns:
-        ``{"support", "agreement", "scores", "solo"}`` -- two DataFrames, the module
-        score matrix, and the local pvclust result.
+        ``{"support", "agreement", "scores", "modules", "solo", "federated"}`` --
+        the per-cluster comparison, the summary metrics, the module score matrix, the
+        table describing what each module contains, this project's own pvclust result,
+        and the federated tree restricted to this project's objects.
     """
     from scipy.cluster.hierarchy import fcluster
     from sklearn.metrics import adjusted_rand_score
@@ -140,10 +144,77 @@ def apply_edges(X, federated_edges, *, method_dist: str = "correlation",
     frame = X if hasattr(X, "columns") else pd.DataFrame(A, columns=labels)
     if cluster == "rows":
         frame = frame.T
-    keep = usable[usable["au_federated"].fillna(1.0) >= alpha] if "au_federated" in usable else usable
-    scores = pd.DataFrame(
-        {f"module_{i+1}": frame[[m for m in mem if m in frame.columns]].mean(axis=1)
-         for i, mem in enumerate(keep["member_list"])},
-        index=frame.index)
+    # Modules must NOT overlap, and must be the TIGHT clusters, not the big ones.
+    # The federated catalogue is a tree, so its clusters are nested: one holds all the
+    # objects, another most of them. Averaging every cluster that passes alpha gives
+    # near-duplicate columns -- a smeared copy of the original space, not a reduction
+    # of it. Taking the largest instead collapses to a single near-root module, which
+    # is no better. What a co-expression module means is the SMALLEST well-supported
+    # group: the tightest set the bootstrap can still resolve. Those are pairwise
+    # disjoint by construction, because a minimal supported cluster cannot contain
+    # another supported one. Objects in no such cluster stay as themselves, so the
+    # space loses redundancy without losing information.
+    candidates = usable.copy()
+    candidates["_n"] = candidates["member_list"].map(len)
+    candidates["_au"] = (pd.to_numeric(candidates["au"], errors="coerce")
+                         if "au" in candidates.columns else np.nan)
+    if candidates["_au"].notna().any():
+        candidates = candidates[candidates["_au"].fillna(0.0) >= alpha]
+    candidates = candidates.sort_values(["_n", "_au"], ascending=[True, False])
 
-    return {"support": support, "agreement": agreement, "scores": scores, "solo": solo}
+    claimed: set = set()
+    modules: List[Dict] = []
+    for _, row in candidates.iterrows():
+        members = [m for m in row["member_list"] if m in frame.columns]
+        if len(members) < 2 or (set(members) & claimed):
+            continue
+        modules.append({"module": f"module_{len(modules) + 1}",
+                        "edge_id": row["edge_id"], "n_members": len(members),
+                        "au": float(row["_au"]) if pd.notna(row["_au"]) else np.nan,
+                        "members": ";".join(members)})
+        claimed |= set(members)
+
+    singles = [c for c in frame.columns if c not in claimed]
+    for c in singles:
+        modules.append({"module": str(c), "edge_id": "", "n_members": 1,
+                        "au": np.nan, "members": str(c)})
+
+    scores = pd.DataFrame(
+        {m["module"]: frame[m["members"].split(";")].mean(axis=1) for m in modules},
+        index=frame.index)
+    module_table = pd.DataFrame(modules)
+    n_grouped = int((module_table["n_members"] > 1).sum())
+    agreement = pd.concat([agreement, pd.DataFrame([
+        {"metric": "modules (supported, non-overlapping)", "value": float(n_grouped)},
+        {"metric": "objects inside a module",
+         "value": float(len(claimed))},
+        {"metric": "module space dimension", "value": float(scores.shape[1])},
+    ])], ignore_index=True)
+
+    # The federated tree, restricted to the objects this project holds -- so the
+    # cohort's own data can be drawn in the FEDERATION's order rather than its own.
+    from .hclust import linkage as _linkage
+    from .distance import distance as _distance
+    fed_result = None
+    try:
+        Dloc = _distance(A, method_dist)
+        Zfed = _linkage(Dloc, method_hclust)
+        fed_edges = []
+        by_id = {e["edge_id"]: e for _, e in usable.iterrows()}
+        from .hclust import edge_table as _edge_table
+        for e in _edge_table(Zfed, labels):
+            f = by_id.get(e["edge_id"])
+            e.update(au=float(f["au"]) if f is not None and "au" in usable.columns else 0.0,
+                     bp=0.0, si=0.0, se_au=0.0, se_bp=0.0, se_si=0.0,
+                     v=0.0, c=0.0, df=0, rss=0.0, pchi=1.0)
+            fed_edges.append(e)
+        from .core import PvclustResult
+        fed_result = PvclustResult(
+            linkage=Zfed, labels=labels, edges=fed_edges,
+            count=np.zeros((len(fed_edges), 1)), r=np.array([1.0]), nboot=np.array([1]),
+            method_dist=method_dist, method_hclust=method_hclust, cluster=cluster)
+    except Exception:                      # a figure is a convenience, not the result
+        fed_result = None
+
+    return {"support": support, "agreement": agreement, "scores": scores,
+            "modules": module_table, "solo": solo, "federated": fed_result}
