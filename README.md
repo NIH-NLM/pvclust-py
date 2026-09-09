@@ -11,8 +11,6 @@ clustering without sharing subject-level data.
 Any clustering method will hand you clusters. The question this answers is **which of
 them are real.**
 
----
-
 ## Quickstart
 
 Runs on an openly licensed public dataset, so anyone can reproduce it.
