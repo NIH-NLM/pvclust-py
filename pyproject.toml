@@ -7,7 +7,7 @@ license = "GPL-3.0-or-later"
 authors = [
   { name = "Anne Deslattes Mays, PhD", email = "adeslat@scitechcon.org" },
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
   "numpy",
   "pandas",
@@ -26,7 +26,7 @@ classifiers = [
 pvclust-py = "pvclust_py.cli:main"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "inmoose"]   # inmoose so CI runs the ComBat tests rather than skipping them
 notebooks = ["jupyter", "matplotlib"]
 combat = ["inmoose"]   # ComBat batch correction (adjust.combat)
 
