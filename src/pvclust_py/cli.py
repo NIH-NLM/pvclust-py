@@ -413,7 +413,7 @@ def project_stats_command(
             f"is integer tallies and carries no subspace.")
 
     stats = listwise_stats(A) if dist == "uncentered" else pairwise_stats(A)
-    write_stats(stats, f"{project}_stats.npz")
+    write_stats(stats, f"{project}_stats.npz", labels=labels)
     Path(f"{project}_labels.txt").write_text("\n".join(labels))
     typer.echo(f"{project}: {A.shape[0]} rows, {A.shape[1]} objects "
                f"-> {project}_stats.npz ({4 * A.shape[1] ** 2:,} numbers)")

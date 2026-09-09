@@ -103,11 +103,53 @@ def test_pooled_statistics_reproduce_the_pooled_raw_distance(method):
         err_msg=f"{method}: federated pooling is not exact")
 
 
-def test_pooling_rejects_mismatched_vocabularies():
+def test_pooling_rejects_a_different_number_of_objects():
     """Projects must agree on the column set before their statistics can be added."""
     X = _lung()
-    with pytest.raises(ValueError, match="disagree on p"):
+    with pytest.raises(ValueError, match="disagree on the number of objects"):
         pool_stats([pairwise_stats(X), pairwise_stats(X[:, :5])])
+
+
+def test_pooling_rejects_same_shape_but_different_objects():
+    """The dangerous case, and the reason labels travel with the numbers.
+
+    Two projects that each selected their own most-variable features produce matrices
+    of the SAME shape describing DIFFERENT proteins. Shape agreement is not enough:
+    adding them would pair one project's protein with another's and yield a pooled
+    Gram that is meaningless, without any error. Seen for real -- two cohorts each
+    took their top 50 by variance and only 46 overlapped.
+    """
+    X = _lung()
+    a = pairwise_stats(X[:, :10]); a["labels"] = [f"p{i}" for i in range(10)]
+    b = pairwise_stats(X[:, 5:15]); b["labels"] = [f"p{i}" for i in range(5, 15)]
+
+    with pytest.raises(ValueError, match="different objects"):
+        pool_stats([a, b])
+
+
+def test_pooling_accepts_matching_labels():
+    X = _lung()
+    labels = [f"p{i}" for i in range(10)]
+    a = pairwise_stats(X[:20, :10]); a["labels"] = labels
+    b = pairwise_stats(X[20:, :10]); b["labels"] = labels
+    pooled = pool_stats([a, b])
+    assert pooled["labels"] == labels
+    np.testing.assert_allclose(pooled["G"], pairwise_stats(X[:, :10])["G"], atol=1e-10)
+
+
+def test_unlabelled_statistics_still_pool():
+    """Statistics written before labels were carried must keep working."""
+    X = _lung()
+    pooled = pool_stats([pairwise_stats(X[:20]), pairwise_stats(X[20:])])
+    np.testing.assert_allclose(pooled["G"], pairwise_stats(X)["G"], atol=1e-10)
+
+
+def test_partially_labelled_statistics_are_refused():
+    """Mixing labelled and unlabelled means the check cannot be made -- say so."""
+    X = _lung()
+    a = pairwise_stats(X[:20, :10]); a["labels"] = [f"p{i}" for i in range(10)]
+    with pytest.raises(ValueError, match="some statistics carry labels"):
+        pool_stats([a, pairwise_stats(X[20:, :10])])
 
 
 @pytest.mark.parametrize("method", NOT_GRAM_DERIVABLE)
