@@ -26,7 +26,10 @@ classifiers = [
 pvclust-py = "pvclust_py.cli:main"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = [
+  "pytest",
+  "inmoose; python_version >= '3.11'",   # so CI runs the ComBat tests, not skips them
+]
 notebooks = ["jupyter", "matplotlib"]
 combat = ["inmoose"]   # ComBat batch correction (adjust.combat)
 
