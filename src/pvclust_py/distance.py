@@ -107,13 +107,41 @@ def pool_stats(parts: Iterable[Mapping[str, np.ndarray]]) -> Dict[str, np.ndarra
     parts = list(parts)
     if not parts:
         raise ValueError("no statistics to pool")
-    keys = set(parts[0])
+
+    # Labels first. Matching SHAPES are not enough: two projects that each selected
+    # their own top-50 features by variance produce two 50x50 matrices describing
+    # DIFFERENT proteins, and adding them silently yields a meaningless Gram. Run
+    # shared-features first so every project clusters the same vocabulary.
+    labelled = [s.get("labels") for s in parts]
+    if any(l is not None for l in labelled):
+        if any(l is None for l in labelled):
+            raise ValueError("some statistics carry labels and others do not -- "
+                             "regenerate them all with the current project-stats")
+        ref = [str(x) for x in labelled[0]]
+        for i, l in enumerate(labelled[1:], start=1):
+            other = [str(x) for x in l]
+            if other != ref:
+                extra = sorted(set(other) - set(ref))[:4]
+                miss = sorted(set(ref) - set(other))[:4]
+                raise ValueError(
+                    f"statistics {i} describes different objects from statistics 0, so "
+                    f"they cannot be added. Only in this one: {extra}; missing from it: "
+                    f"{miss}. Run shared-features across the projects and rebuild the "
+                    f"statistics on that common vocabulary.")
+
+    keys = set(parts[0]) - {"labels"}
     for i, s in enumerate(parts[1:], start=1):
-        if set(s) != keys:
-            raise ValueError(f"statistics {i} has keys {sorted(s)}, expected {sorted(keys)}")
+        if set(s) - {"labels"} != keys:
+            raise ValueError(f"statistics {i} has keys {sorted(set(s) - {'labels'})}, "
+                             f"expected {sorted(keys)}")
         if s.get("G") is not None and s["G"].shape != parts[0]["G"].shape:
-            raise ValueError("statistics disagree on p -- pool one shared vocabulary")
-    return {k: sum(s[k] for s in parts) for k in keys}
+            raise ValueError("statistics disagree on the number of objects -- "
+                             "pool one shared vocabulary")
+
+    pooled = {k: sum(s[k] for s in parts) for k in keys}
+    if labelled[0] is not None:
+        pooled["labels"] = labelled[0]
+    return pooled
 
 
 def _zero_diagonal(D: np.ndarray) -> np.ndarray:

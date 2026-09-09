@@ -132,17 +132,30 @@ def write_counts(result, path, project: str, n: Optional[int] = None) -> None:
     df.to_csv(path, index=False)
 
 
-def write_stats(stats, path) -> None:
-    """Write sufficient statistics as compressed npz -- what exact mode ships."""
-    np.savez_compressed(path, **{k: np.asarray(v) for k, v in stats.items()})
+def write_stats(stats, path, labels=None) -> None:
+    """Write sufficient statistics as compressed npz -- what exact mode ships.
+
+    ``labels`` travels with the numbers on purpose. Two projects that each selected
+    their own most-variable features produce same-shaped matrices describing different
+    objects; without the labels the aggregator cannot tell, and adding them gives a
+    silently meaningless result.
+    """
+    out = {k: np.asarray(v) for k, v in stats.items() if k != "labels"}
+    if labels is not None:
+        out["labels"] = np.asarray([str(x) for x in labels])
+    elif "labels" in stats:
+        out["labels"] = np.asarray([str(x) for x in stats["labels"]])
+    np.savez_compressed(path, **out)
 
 
 def read_stats(path) -> dict:
     """Read sufficient statistics written by :func:`write_stats`."""
-    with np.load(path) as z:
+    with np.load(path, allow_pickle=False) as z:
         out = {k: z[k] for k in z.files}
     if "n" in out:
         out["n"] = int(out["n"])
+    if "labels" in out:
+        out["labels"] = [str(x) for x in out["labels"]]
     return out
 
 
