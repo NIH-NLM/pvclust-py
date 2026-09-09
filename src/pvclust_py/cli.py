@@ -83,6 +83,13 @@ _ANNOTATE = typer.Option(
          "clustering follows the strips rather than biology, you are seeing batch.")
 
 
+_SHARED = typer.Option(
+    None, "--shared-features",
+    help="Restrict to a common vocabulary, from `shared-features`. REQUIRED for "
+         "federation: without it each project selects its own features, the "
+         "statistics describe different objects, and the catalogue only partly "
+         "applies. Mutually exclusive with --top-variable.")
+
 _TOPVAR = typer.Option(
     None, "--top-variable",
     help="Keep only the N most variable objects. Cost grows with the SQUARE of the "
@@ -158,7 +165,8 @@ def _apply_adjust(X, ann, adjust, batch_col, protect, report):
 
 
 def _load(matrix, rfu, samples, somamers, top_variable=None, cluster="columns",
-          log2=False, feature_map=None, feature_key=None, feature_label=None):
+          log2=False, feature_map=None, feature_key=None, feature_label=None,
+          shared_features=None):
     """Resolve whichever input form was given into one labelled DataFrame."""
     from .io import read_matrix
     from .somascan import read_somascan
@@ -176,6 +184,26 @@ def _load(matrix, rfu, samples, somamers, top_variable=None, cluster="columns",
             "no input given. Use --matrix <file> (rows = samples, columns = "
             "objects), or the SomaScan adapter --rfu --samples --somamers (all "
             "three, since they are aligned by position)")
+
+    if shared_features:
+        if top_variable:
+            raise typer.BadParameter(
+                "--shared-features and --top-variable cannot be combined. Selecting "
+                "the most variable features AFTER restricting to a shared vocabulary "
+                "would let each project diverge again, which is exactly what "
+                "--shared-features exists to prevent. Select features first, run "
+                "shared-features across the projects, then pass the result here.")
+        import pandas as _pd
+        want = [str(f) for f in _pd.read_csv(shared_features)["feature"]]
+        axis = X.index if cluster == "rows" else X.columns
+        missing = [f for f in want if f not in set(map(str, axis))]
+        if missing:
+            raise typer.BadParameter(
+                f"{len(missing)} of {len(want)} shared features are absent here, e.g. "
+                f"{missing[:4]}. Every project must hold the whole shared vocabulary; "
+                f"rebuild it from THIS project's feature list too.")
+        X = X.loc[want] if cluster == "rows" else X[want]
+        typer.echo(f"  restricted to {len(want)} shared features")
 
     if top_variable:
         # Filter the axis being CLUSTERED -- filtering the resampling axis instead
@@ -200,6 +228,7 @@ def cluster_command(
     somamers: Optional[Path] = _SOMAMERS,
     cluster: str = _CLUSTER,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     metadata: Optional[Path] = _METADATA,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
@@ -221,7 +250,7 @@ def cluster_command(
     from .io import write_counts, write_edges, write_project_json
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
         from .io import read_metadata as _rm
@@ -258,6 +287,7 @@ def kmeans_command(
     somamers: Optional[Path] = _SOMAMERS,
     cluster: str = _CLUSTER,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     metadata: Optional[Path] = _METADATA,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
@@ -282,7 +312,7 @@ def kmeans_command(
     from .io import write_counts, write_edges, write_project_json
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
         from .io import read_metadata as _rm
@@ -319,6 +349,7 @@ def project_features_command(
     somamers: Optional[Path] = _SOMAMERS,
     cluster: str = _CLUSTER,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: str = _FEATKEY,
@@ -334,7 +365,7 @@ def project_features_command(
     from .core import orient
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
         from .io import read_metadata as _rm
@@ -364,6 +395,7 @@ def project_stats_command(
     somamers: Optional[Path] = _SOMAMERS,
     cluster: str = _CLUSTER,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: str = _FEATKEY,
@@ -386,7 +418,7 @@ def project_stats_command(
     from .io import write_stats
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
         from .io import read_metadata as _rm
@@ -429,6 +461,7 @@ def count_edges_command(
     somamers: Optional[Path] = _SOMAMERS,
     cluster: str = _CLUSTER,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: str = _FEATKEY,
@@ -459,7 +492,7 @@ def count_edges_command(
     from .core import count_edges, orient
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
         from .io import read_metadata as _rm
@@ -493,6 +526,7 @@ def heatmap_command(
     samples: Optional[Path] = _SAMPLES,
     somamers: Optional[Path] = _SOMAMERS,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: str = _FEATKEY,
@@ -533,7 +567,7 @@ def heatmap_command(
         raise typer.BadParameter("--method kmeans needs --k")
 
     X = _load(matrix, rfu, samples, somamers, top_variable, "columns",
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
 
     # Annotations first: both the adjustment and the annotation strips need them.
     ann = read_metadata(metadata) if metadata else None
@@ -585,6 +619,7 @@ def diagnose_command(
     annotate: Optional[str] = typer.Option(
         None, "--annotate", help="Comma-separated annotation columns; default is all of them"),
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     log2: bool = _LOG2,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: str = _FEATKEY,
@@ -615,7 +650,7 @@ def diagnose_command(
     from .somascan import read_somascan
 
     X = _load(matrix, rfu, samples, somamers, top_variable, "columns",
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
 
     # Annotations first: adjustment needs them, and so does the association test.
     if metadata:
@@ -666,6 +701,7 @@ def apply_edges_command(
     samples: Optional[Path] = _SAMPLES,
     somamers: Optional[Path] = _SOMAMERS,
     top_variable: Optional[int] = _TOPVAR,
+    shared_features: Optional[Path] = _SHARED,
     feature_map: Optional[Path] = _FEATMAP,
     feature_key: Optional[str] = _FEATKEY,
     feature_label: Optional[str] = _FEATLABEL,
@@ -690,7 +726,7 @@ def apply_edges_command(
     from .apply import apply_edges
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label)
+              log2, feature_map, feature_key, feature_label, shared_features)
     out = apply_edges(X, federated_edges, method_dist=dist, method_hclust=linkage,
                       nboot=n_boot, seed=seed, alpha=alpha, cluster=cluster)
 

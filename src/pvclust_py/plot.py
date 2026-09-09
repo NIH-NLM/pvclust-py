@@ -168,13 +168,17 @@ def _interactive(result, dd, nodes, picked, base, alpha, use) -> None:
 
 
 # --------------------------------------------------------------------- heatmap
-def _support_ordered(result, sort_by_support):
-    """The linkage to draw: rotated by support, or as computed."""
+def _support_ordered(result, sort_by_support, how: str = "mean"):
+    """The linkage to draw: rotated so the best-supported structure leads.
+
+    ``how="mean"`` orders the whole layout strongest-to-weakest, which is what makes a
+    heatmap readable across its width. ``how="max"`` only guarantees the single best
+    cluster comes first and leaves the rest scattered, so it is not the default.
+    """
     if not sort_by_support or result.is_kmeans or not result.linkage.size:
         return result.linkage
     from .hclust import rotate_by_support
-    return rotate_by_support(result.linkage, result.edges, key=sort_by_support)
-
+    return rotate_by_support(result.linkage, result.edges, key=sort_by_support, how=how)
 
 def _order_and_blocks(result, labels, sort_by_support=None):
     """Leaf order and cluster blocks for one axis of the heatmap.

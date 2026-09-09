@@ -24,7 +24,12 @@ dag-*.html
 .DS_Store
 
 # Study data: fetched, never committed. See README for sources.
-data/
+#
+# ANCHORED with a leading slash on purpose. An unanchored `data/` matches a directory
+# of that name at ANY depth, which silently excluded src/pvclust_py/data/ -- the demo
+# dataset the package ships -- so CI cloned a repo without it and 35 tests failed on
+# FileNotFoundError. This rule is for the study data at the repo root only.
+/data/
 
 # Analysis outputs. Every command writes to the working directory, so running one
 # from the repo root leaves artifacts here; they are results, not source.

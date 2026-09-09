@@ -152,35 +152,69 @@ def compatible(a: Sequence[str], b: Sequence[str]) -> bool:
     return not (sa & sb) or sa <= sb or sb <= sa
 
 
-def rotate_by_support(Z, edges, key: str = "au"):
-    """Rotate each merge so the better-supported subtree is drawn first.
+def subtree_support(Z, edges, key: str = "au", how: str = "max"):
+    """Support of the best (or average) cluster within each subtree.
+
+    A leaf contains no cluster, so it gets ``-inf`` -- it should never win a
+    comparison against a subtree that actually holds one.
+
+    Returns a dict keyed as scipy indexes nodes: ``0..n-1`` are leaves, ``n+i`` is the
+    cluster formed by merge ``i``.
+    """
+    Z = np.asarray(Z, dtype=float)
+    n = Z.shape[0] + 1
+    own = {n + i: float(e.get(key, 0.0) or 0.0) for i, e in enumerate(edges)}
+
+    best, total, count = {}, {}, {}
+    for i in range(Z.shape[0]):
+        node = n + i
+        vals = [own[node]]
+        sums, cnts = own[node], 1
+        for child in (int(Z[i, 0]), int(Z[i, 1])):
+            if child >= n:
+                vals.append(best[child])
+                sums += total[child]
+                cnts += count[child]
+        best[node] = max(vals)
+        total[node], count[node] = sums, cnts
+
+    out = {i: float("-inf") for i in range(n)}          # leaves hold no cluster
+    for node in best:
+        out[node] = best[node] if how == "max" else total[node] / count[node]
+    return out
+
+
+def rotate_by_support(Z, edges, key: str = "au", how: str = "max"):
+    """Rotate each merge so the better-supported side is drawn first.
 
     Swapping a merge's two children is a **rotation**, not a reordering: the tree is
     unchanged and every cluster keeps its members. Only the left-to-right layout
-    moves. Doing it by AU puts the best-supported structure at one end, so a heatmap
-    drawn in that order reads from strongest to weakest.
+    moves, so a heatmap drawn in this order reads strongest-first without altering
+    any result.
 
-    A leaf has no support of its own, so it takes the support of the merge that
-    created its parent -- otherwise leaves would always sort last and drag good
-    clusters apart.
+    The comparison is on the best cluster ANYWHERE in each subtree, not on the two
+    children's own values. Comparing children directly does almost nothing: a leaf has
+    no support of its own, so leaf-versus-leaf always ties and leaf-versus-cluster
+    compares a real number against a fallback. Looking down the whole subtree means
+    the branch containing the single best-supported cluster is the one that goes
+    first, all the way from the root.
 
     Args:
         Z: linkage matrix.
-        edges: the per-edge records, in merge order, carrying ``key``.
+        edges: per-edge records in merge order, carrying ``key``.
         key: which support value to sort on -- ``au``, ``bp`` or ``si``.
+        how: ``max`` puts the branch holding the single best cluster first;
+            ``mean`` favours the branch that is well supported throughout.
 
     Returns:
-        A new linkage matrix. Pass it to scipy's ``dendrogram``, which draws a merge's
-        first child on the left.
+        A new linkage matrix. scipy's ``dendrogram`` draws a merge's first child on
+        the left.
     """
     Z = np.asarray(Z, dtype=float).copy()
-    n = Z.shape[0] + 1
-    support = {n + i: float(e.get(key, 0.0) or 0.0) for i, e in enumerate(edges)}
+    strength = subtree_support(Z, edges, key=key, how=how)
 
     for i in range(Z.shape[0]):
         a, b = int(Z[i, 0]), int(Z[i, 1])
-        sa = support.get(a, support.get(n + i, 0.0))
-        sb = support.get(b, support.get(n + i, 0.0))
-        if sb > sa:                      # put the better-supported child first
+        if strength[b] > strength[a]:
             Z[i, 0], Z[i, 1] = Z[i, 1], Z[i, 0]
     return Z

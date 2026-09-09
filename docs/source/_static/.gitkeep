@@ -1,0 +1,2 @@
+# Keeps docs/source/_static/ in git. Sphinx warns when html_static_path points at
+# a missing directory, and the docs build runs with -W, so the warning fails CI.
