@@ -255,8 +255,12 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
     n_rann = 0 if row_annotations is None else row_annotations.shape[1]
     n_cann = 0 if col_annotations is None else col_annotations.shape[1]
 
-    fig = plt.figure(figsize=(max(9, min(26, 0.16 * M.shape[1] + 5)),
-                              max(7, min(24, 0.14 * M.shape[0] + 4))),
+    # Room for the tick labels when they are actually going to be drawn: 100 gene
+    # symbols at 6pt need roughly 0.11 inch each or they collide.
+    w_cap = 40 if M.shape[1] <= max_labels else 26
+    h_cap = 40 if M.shape[0] <= max_labels else 24
+    fig = plt.figure(figsize=(max(9, min(w_cap, 0.16 * M.shape[1] + 5)),
+                              max(7, min(h_cap, 0.14 * M.shape[0] + 4))),
                      constrained_layout=True)
     gs = GridSpec(3 + (1 if n_cann else 0), 3 + (1 if n_rann else 0), figure=fig,
                   height_ratios=([1.6] + ([0.12 * n_cann] if n_cann else []) + [6, 0.35]),
@@ -275,12 +279,13 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
         _axis_marker(ax, row_result, rextra, alpha, len(row_order), False, sort_by_support)
 
     # --- annotation strips ----------------------------------------------------
+    ann_key = []
     if n_cann:
         ax = fig.add_subplot(gs[1, c_main])
-        _annotation_strip(ax, col_annotations.loc[col_order], horizontal=True)
+        ann_key += _annotation_strip(ax, col_annotations.loc[col_order], horizontal=True)
     if n_rann:
         ax = fig.add_subplot(gs[r_main, 1])
-        _annotation_strip(ax, row_annotations.loc[row_order], horizontal=False)
+        ann_key += _annotation_strip(ax, row_annotations.loc[row_order], horizontal=False)
 
     # --- the heatmap itself ---------------------------------------------------
     ax = fig.add_subplot(gs[r_main, c_main])
@@ -298,10 +303,11 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
 
     cax = fig.add_subplot(gs[r_main, c_main + 1])
     fig.colorbar(im, cax=cax, label="z-score" if z_score else "value")
+    _annotation_key(fig, ann_key)
 
     fig.suptitle(title or "clustered heatmap", fontweight="bold")
-    fig.savefig(base + ".png", dpi=200)
-    fig.savefig(base + ".svg")
+    fig.savefig(base + ".png", dpi=200, bbox_inches="tight")
+    fig.savefig(base + ".svg", bbox_inches="tight")
     plt.close(fig)
 
     _interactive_heatmap(M, base, title, row_annotations, col_annotations,
@@ -376,17 +382,36 @@ def _axis_marker(ax, result, extra, alpha, n, horizontal, sort_by_support=None):
             ax.set_ylim(n, 0); ax.set_xlim(0, 1)
 
 
+_MISSING = {"NA", "nan", "NaN", "None", "", "<NA>"}
+
+
 def _annotation_strip(ax, ann, horizontal):
-    """Categorical annotation bars -- the batch-effect check."""
+    """Categorical annotation bars -- the batch-effect and demographics check.
+
+    Every level of every variable gets its own colour, and the mapping is returned so
+    the caller can draw a key. Sharing one colormap across variables by normalised
+    code -- the obvious shortcut -- makes the same colour mean 'female' in one strip
+    and 'remission' in the next, which is worse than no colour at all. Missing values
+    are grey and are never given a level.
+    """
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    codes = []
+    palette = (list(plt.get_cmap("tab20").colors) + list(plt.get_cmap("tab20b").colors)
+               + list(plt.get_cmap("tab20c").colors))
+    grey = (0.88, 0.88, 0.88)
+    rows, key, k = [], [], 0
     for col in ann.columns:
-        cat = pd.Categorical(ann[col].astype(str))
-        codes.append(cat.codes / max(1, len(cat.categories) - 1))
-    A = np.array(codes)
-    ax.imshow(A if horizontal else A.T, aspect="auto", cmap="tab20",
+        s = ann[col].astype(str)
+        levels = sorted({v for v in s.unique() if v not in _MISSING})
+        colours = {}
+        for lv in levels:
+            colours[lv] = palette[k % len(palette)]
+            k += 1
+        key.append((col, [(lv, colours[lv]) for lv in levels]))
+        rows.append([colours.get(v, grey) for v in s])
+    A = np.array(rows, dtype=float)                       # (variables, items, RGB)
+    ax.imshow(A if horizontal else A.transpose(1, 0, 2), aspect="auto",
               interpolation="nearest")
     if horizontal:
         ax.set_yticks(range(len(ann.columns)))
@@ -396,6 +421,36 @@ def _annotation_strip(ax, ann, horizontal):
         ax.set_xticks(range(len(ann.columns)))
         ax.set_xticklabels(ann.columns, rotation=90, fontsize=6)
         ax.set_yticks([])
+    return key
+
+
+def _annotation_key(fig, keys, max_levels: int = 12):
+    """One figure-level legend for the annotation strips, grouped by variable.
+
+    A variable with more levels than ``max_levels`` (a 15-band age group, say) is
+    named but not enumerated -- the strip still reads as a gradient, and spelling out
+    every band would crowd out the rest of the key.
+    """
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+
+    handles, labels = [], []
+    for col, levels in keys:
+        if not levels:
+            continue
+        handles.append(Line2D([], [], linestyle="none"))
+        labels.append(f"$\\bf{{{col.replace('_', chr(92) + '_')}}}$")
+        if len(levels) > max_levels:
+            handles.append(Line2D([], [], linestyle="none"))
+            labels.append(f"  {len(levels)} levels, see hover in the HTML")
+            continue
+        for lv, colour in levels:
+            handles.append(Patch(facecolor=colour, edgecolor="none"))
+            labels.append(f"  {lv}")
+    if not handles:
+        return
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+               frameon=False, fontsize=7, handlelength=1.2, borderaxespad=0.0)
 
 
 def _interactive_heatmap(M, base, title, row_ann, col_ann, row_order, col_order):

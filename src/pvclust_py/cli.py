@@ -546,6 +546,8 @@ def heatmap_command(
     annotate: Optional[str] = _ANNOTATE,
     metadata: Optional[Path] = _METADATA,
     max_rows: int = typer.Option(80, "--max-rows", help="Subsample rows above this, to keep the figure legible"),
+    max_labels: int = typer.Option(60, "--max-labels",
+        help="Draw tick labels while an axis has at most this many objects"),
 ):
     """Two-way clustered heatmap: dendrograms on BOTH axes, with the AU boxes.
 
@@ -603,7 +605,7 @@ def heatmap_command(
 
     base = f"{project}_heatmap_{method}"
     heatmap(X, base, row_result=rows_res, col_result=cols_res, alpha=alpha,
-            row_annotations=ann,
+            row_annotations=ann, max_labels=max_labels,
             title=f"{project} — {method} ({X.shape[0]} rows x {X.shape[1]} columns)")
     typer.echo(f"{project}: wrote {base}.(png|svg|html)")
 
@@ -712,6 +714,10 @@ def apply_edges_command(
     n_boot: int = _NBOOT,
     seed: int = _SEED,
     alpha: float = typer.Option(0.95, "--alpha", help="AU threshold"),
+    metadata: Optional[Path] = _METADATA,
+    annotate: Optional[str] = _ANNOTATE,
+    plot: bool = _PLOT,
+    max_rows: int = typer.Option(60, "--max-rows", help="Subsample rows for legibility"),
 ):
     """Round 3: what the federation gives back to THIS project.
 
@@ -733,6 +739,7 @@ def apply_edges_command(
     out["support"].to_csv(f"{project}_from-federated_edge_support.csv", index=False)
     out["agreement"].to_csv(f"{project}_from-federated_agreement.csv", index=False)
     out["scores"].to_csv(f"{project}_from-federated_module_scores.csv")
+    out["modules"].to_csv(f"{project}_from-federated_modules.csv", index=False)
 
     typer.echo(f"\n{project} — this project's outcome using the federated clusters\n")
     typer.echo(out["agreement"].to_string(index=False))
@@ -742,6 +749,32 @@ def apply_edges_command(
         for _, r in gained.head(5).iterrows():
             typer.echo(f"  AU {r['au_local']:.3f} alone -> {r['au_federated']:.3f} federated"
                        f"  (n={int(r['n_members'])})  {r['members'][:60]}")
+    if plot and out.get("federated") is not None:
+        from .io import read_metadata as _rm
+        from .plot import heatmap as _heatmap
+
+        ann = None
+        if annotate and metadata:
+            cols = [c.strip() for c in annotate.split(",")]
+            ann = _rm(metadata)[cols]
+        Xp = X if hasattr(X, "columns") else None
+        if Xp is not None:
+            keep = [c for c in out["federated"].labels if c in Xp.columns]
+            Xp = Xp[keep]
+            if len(Xp) > max_rows:
+                Xp = Xp.sample(max_rows, random_state=seed).sort_index()
+            if ann is not None:
+                ann = ann.loc[[i for i in Xp.index if i in ann.index]]
+            # rows clustered locally, columns arranged by the FEDERATED tree
+            from .core import pvclust as _pv
+            rows = _pv(Xp, cluster="rows", method_dist=dist, method_hclust=linkage,
+                       nboot=100, seed=seed)
+            _heatmap(Xp, f"{project}_from-federated_heatmap",
+                     row_result=rows, col_result=out["federated"], alpha=alpha,
+                     row_annotations=ann,
+                     title=f"{project} — own data, arranged by the FEDERATED clustering")
+            typer.echo(f"  wrote {project}_from-federated_heatmap.(png|svg|html)")
+
     typer.echo(f"\nwrote {project}_from-federated_"
                f"{{edge_support,agreement,module_scores}}.csv")
 
