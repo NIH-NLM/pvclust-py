@@ -18,6 +18,7 @@ contribute to one clustering without sharing subject-level data.
    api/aggregate
    api/apply
    api/diagnostics
+   api/validate
    api/adjust
    api/io
    api/somascan
