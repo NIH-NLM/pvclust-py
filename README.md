@@ -1,3 +1,4 @@
+[![Build and Push Docker Image](https://github.com/NIH-NLM/pvclust-py/actions/workflows/docker-build.yml/badge.svg)](https://github.com/NIH-NLM/pvclust-py/actions/workflows/docker-build.yml)
 # pvclust-py
 
 Hierarchical clustering with **AU *p*-values** via multiscale bootstrap resampling —
