@@ -715,6 +715,10 @@ def apply_edges_command(
     seed: int = _SEED,
     alpha: float = typer.Option(0.95, "--alpha", help="AU threshold"),
     metadata: Optional[Path] = _METADATA,
+    adjust: str = _ADJUST,
+    batch_col: Optional[str] = _BATCHCOL,
+    protect: Optional[str] = _PROTECT,
+    adjust_report: bool = _ADJREPORT,
     annotate: Optional[str] = _ANNOTATE,
     plot: bool = _PLOT,
     max_rows: int = typer.Option(60, "--max-rows", help="Subsample rows for legibility"),
@@ -733,6 +737,17 @@ def apply_edges_command(
 
     X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
+    # The same correction every other command applies. Without it this step measures
+    # the federated clusters against uncorrected data while the catalogue was built
+    # from corrected data, so a batch shift reads as a cluster this project lost.
+    _ann = None
+    if metadata:
+        from .io import read_metadata as _rm
+        _ann = _rm(metadata)
+    elif samples:
+        from .somascan import read_somascan as _rs
+        _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
+    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     out = apply_edges(X, federated_edges, method_dist=dist, method_hclust=linkage,
                       nboot=n_boot, seed=seed, alpha=alpha, cluster=cluster)
 

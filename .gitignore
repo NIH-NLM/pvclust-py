@@ -50,3 +50,6 @@ federated_*.json
 # Derived cohort splits, written by the walkthrough
 *_abundance.csv
 *_metadata.csv
+
+# Notebook 3/4 working directory
+/sle-run/
