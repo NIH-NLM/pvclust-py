@@ -49,7 +49,7 @@ def apply_edges(X, federated_edges, *, method_dist: str = "correlation",
     Args:
         X: this project's matrix, same orientation as when its statistics were shipped.
         federated_edges: the aggregator's edge table -- a DataFrame or the path to
-            ``federated_edges.csv`` / ``federated_catalogue.csv``. Needs ``edge_id``
+            ``federated_pvclust_edges.csv`` / ``..._catalogue.csv``. Needs ``edge_id``
             and ``members``; ``au`` is used for the side-by-side comparison when present.
         alpha: threshold for counting a cluster as supported.
 

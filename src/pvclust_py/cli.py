@@ -697,7 +697,7 @@ def diagnose_command(
 def apply_edges_command(
     project: str = typer.Option(..., "--project", help="Project/cohort id"),
     federated_edges: Path = typer.Option(..., "--federated-edges",
-        help="The aggregator's federated_edges.csv (or federated_catalogue.csv)"),
+        help="The aggregator's federated_<method>_edges.csv (or _catalogue.csv)"),
     matrix: Optional[Path] = _MATRIX,
     rfu: Optional[Path] = _RFU,
     samples: Optional[Path] = _SAMPLES,
@@ -802,9 +802,11 @@ def aggregate_trees_command(
     dist: str = _DIST,
     linkage: str = _LINK,
     alpha: float = typer.Option(0.95, "--alpha", help="AU threshold for the consensus set"),
-    partition: str = typer.Option("hclust", "--partition",
-        help="How to build the catalogue from the pooled distance matrix: hclust "
-             "(a dendrogram) or kmeans (a flat k-medoids partition, needs --k)"),
+    partition: str = typer.Option("pvclust", "--partition",
+        help="How to build the catalogue from the pooled distance matrix: pvclust "
+             "(a dendrogram; 'hclust' is accepted as a synonym) or kmeans (a flat "
+             "k-medoids partition, needs --k). The choice is stamped into the output "
+             "names, so the two can be run side by side without overwriting"),
     k: Optional[int] = typer.Option(None, "--k", help="Clusters, for --partition kmeans"),
 ):
     """Combine per-project artifacts into the federated tree and AU p-values.
@@ -822,6 +824,8 @@ def aggregate_trees_command(
     if not stats and not counts:
         raise typer.BadParameter("give --stats (exact mode) and/or --counts (counts mode)")
 
+    label = "kmeans" if partition == "kmeans" else "pvclust"
+
     names = [l for l in Path(labels).read_text().splitlines() if l]
     catalogue = None
 
@@ -834,13 +838,16 @@ def aggregate_trees_command(
             from .aggregate import federated_kmeans
             catalogue = federated_kmeans(D, names, k=k)
             typer.echo(f"  k-medoids partition on the pooled distance matrix, k={k}")
-        elif partition != "hclust":
-            raise typer.BadParameter("--partition must be hclust or kmeans")
+        elif partition not in ("pvclust", "hclust"):
+            raise typer.BadParameter("--partition must be pvclust or kmeans")
+        # The pooled distance does not depend on the partition, so it keeps one name;
+        # the catalogue and the edges do, so they carry the method and the two runs
+        # can sit in one directory without clobbering each other.
         pd.DataFrame(D, index=names, columns=names).to_csv("federated_distance.csv")
         pd.DataFrame([{**e, "members": ";".join(e["members"])} for e in catalogue]
-                     ).to_csv("federated_catalogue.csv", index=False)
+                     ).to_csv(f"federated_{label}_catalogue.csv", index=False)
         typer.echo(f"pooled {len(stats)} projects -> federated_distance.csv, "
-                   f"federated_catalogue.csv ({len(catalogue)} clusters)")
+                   f"federated_{label}_catalogue.csv ({len(catalogue)} clusters)")
 
     if counts:
         from .io import counts_from_json
@@ -849,10 +856,10 @@ def aggregate_trees_command(
         frames = ([counts_from_json(js)] if js else []) + [pd.read_csv(c) for c in cs]
         pooled = pool_counts(frames)
         edges = federated_edges(pooled, catalogue)
-        edges.to_csv("federated_edges.csv", index=False)
+        edges.to_csv(f"federated_{label}_edges.csv", index=False)
         cons = consensus_clusters(edges, alpha=alpha)
         typer.echo(f"pooled counts from {len(counts)} projects across "
-                   f"{pooled['r'].nunique()} scales -> federated_edges.csv")
+                   f"{pooled['r'].nunique()} scales -> federated_{label}_edges.csv")
         typer.echo(f"  {len(cons)} clusters at AU >= {alpha}")
 
 
