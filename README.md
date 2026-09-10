@@ -176,7 +176,7 @@ pvclust-py aggregate-trees --labels cohortA_labels.txt \
 
 # PASS 2 -- each project counts against THAT catalogue
 pvclust-py count-edges --project cohortA --matrix cohortA.csv --log2 \
-    --catalogue federated_catalogue.csv --dist minkowski --linkage ward.D2
+    --catalogue federated_pvclust_catalogue.csv --dist minkowski --linkage ward.D2
 
 # pool
 pvclust-py aggregate-trees --labels cohortA_labels.txt \
@@ -186,10 +186,10 @@ pvclust-py aggregate-trees --labels cohortA_labels.txt \
 
 # what the federation gives back to one project
 pvclust-py apply-edges --project cohortB --matrix cohortB.csv --log2 \
-    --federated-edges federated_edges.csv --dist minkowski --linkage ward.D2
+    --federated-edges federated_pvclust_edges.csv --dist minkowski --linkage ward.D2
 ```
 
-Done correctly, every cluster is measured by every project and `federated_edges.csv`
+Done correctly, every cluster is measured by every project and `federated_pvclust_edges.csv`
 carries an `n_projects` column; the aggregator **warns** when any cluster was measured
 by fewer than all. For a flat k-medoids partition instead of a dendrogram, add
 `--partition kmeans --k 5` to the catalogue step and `--method kmeans --k 5
