@@ -3,7 +3,7 @@
 Stands in for a real jupyter run (nbconvert is not installed) and is worth keeping:
 it makes the notebooks testable in CI without a kernel.
 """
-import json, sys, time, traceback
+import json, os, sys, time, traceback
 from pathlib import Path
 
 import matplotlib
@@ -12,7 +12,9 @@ matplotlib.use("Agg")
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 failed = False
+HOME = Path.cwd()
 for nb_path in sorted(Path("ipynb").glob("*.ipynb")):
+    os.chdir(HOME)          # a notebook that chdirs must not strand the next one
     cells = [c for c in json.loads(nb_path.read_text())["cells"] if c["cell_type"] == "code"]
     ns = {"__name__": "__main__"}
     print(f"\n=== {nb_path.name}: {len(cells)} code cells ===")
