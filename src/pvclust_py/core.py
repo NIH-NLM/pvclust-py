@@ -84,6 +84,11 @@ class PvclustResult:
         return pd.DataFrame(rows)
 
 
+#: Kept as a private alias so older call sites inside this package keep working.
+#: ``tally`` is public because ``kmeans-py`` depends on it -- the bootstrap loop is
+#: shared between the two clustering methods and should exist once, not twice.
+
+
 def orient(X, labels=None, cluster: str = "columns"):
     """Put the objects to be clustered on the COLUMNS, whatever the caller passed.
 
@@ -117,7 +122,7 @@ def orient(X, labels=None, cluster: str = "columns"):
     return A, labels, f"{A.shape[0]} rows"
 
 
-def _tally(X, ids, cluster_fn, sizes, nboot, seed, quiet, r_eff):
+def tally(X, ids, cluster_fn, sizes, nboot, seed, quiet, r_eff):
     """Resample rows at each scale, recluster, and count which candidate clusters
     reappeared.
 
@@ -221,7 +226,7 @@ def pvclust(X, labels: Optional[Sequence[str]] = None, *,
             return None                      # R skips, but still counts toward nboot
         return edge_members(linkage(D, method_hclust), labels)
 
-    count, na_flag = _tally(X, ids, cluster_replicate, sizes, int(nboot), seed, quiet, r_eff)
+    count, na_flag = tally(X, ids, cluster_replicate, sizes, int(nboot), seed, quiet, r_eff)
     nboot_vec = np.full(len(sizes), int(nboot))
     fits = [msfit(count[i] / nboot_vec, r_eff, nboot_vec) for i in range(len(edges))]
 
@@ -342,7 +347,7 @@ def kmeans_pv(X, labels: Optional[Sequence[str]] = None, *, k: int = 3,
 
     if jaccard is None:
         cluster_fn = lambda M: [sorted(m) for m in fit(M)]
-        count, na_flag = _tally(X, ids, cluster_fn, sizes, int(nboot), seed, quiet, r_eff)
+        count, na_flag = tally(X, ids, cluster_fn, sizes, int(nboot), seed, quiet, r_eff)
     else:
         # Relaxed matching cannot go through edge_id, so tally directly.
         sets = [set(m) for m in candidates]
@@ -471,7 +476,7 @@ def count_edges(X, candidates: Sequence[Sequence[str]],
                     for c in range(k)]
 
     if jaccard is None:
-        counts, na_flag = _tally(X, ids, cluster_replicate, sizes, int(nboot), seed,
+        counts, na_flag = tally(X, ids, cluster_replicate, sizes, int(nboot), seed,
                                  quiet, r_eff)
     else:
         # Relaxed matching cannot go through edge_id, so tally memberships directly.
@@ -491,3 +496,6 @@ def count_edges(X, candidates: Sequence[Sequence[str]],
                         counts[i, j] += 1
 
     return counts, r_eff, np.full(len(sizes), int(nboot)), na_flag
+
+
+_tally = tally          # backwards-compatible private alias

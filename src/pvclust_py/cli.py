@@ -112,7 +112,7 @@ def _guess_technical(columns):
             if c.lower() in known or any(h in c.lower() for h in hints)]
 
 
-def _apply_adjust(X, ann, adjust, batch_col, protect, report):
+def apply_adjust(X, ann, adjust, batch_col, protect, report):
     """Batch-correct the matrix, or report the confounding and stop."""
     from .adjust import adjust_batch, combat, confounding
 
@@ -164,7 +164,14 @@ def _apply_adjust(X, ann, adjust, batch_col, protect, report):
     return out
 
 
-def _load(matrix, rfu, samples, somamers, top_variable=None, cluster="columns",
+# ``load_inputs`` and ``apply_adjust`` are public because kmeans-py calls them: both
+# packages take the same matrix in the same forms and must batch-correct it the same
+# way, and a second implementation would be a second set of bugs. They stay here
+# rather than moving to a library module because both raise typer errors, which is
+# the right behaviour for a command line and the wrong one for a library.
+
+
+def load_inputs(matrix, rfu, samples, somamers, top_variable=None, cluster="columns",
           log2=False, feature_map=None, feature_key=None, feature_label=None,
           shared_features=None):
     """Resolve whichever input form was given into one labelled DataFrame."""
@@ -249,7 +256,7 @@ def cluster_command(
     from .core import pvclust, pvpick
     from .io import write_counts, write_edges, write_project_json
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
@@ -258,7 +265,7 @@ def cluster_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     res = pvclust(X, cluster=cluster, method_dist=dist, method_hclust=linkage,
                   nboot=n_boot, seed=seed, quiet=False)
 
@@ -311,7 +318,7 @@ def kmeans_command(
     from .core import kmeans_pv
     from .io import write_counts, write_edges, write_project_json
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
@@ -320,7 +327,7 @@ def kmeans_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     res = kmeans_pv(X, k=k, cluster=cluster, nboot=n_boot, seed=seed, jaccard=jaccard)
 
     write_edges(res, f"{project}_kmeans{k}_edges.csv")
@@ -364,7 +371,7 @@ def project_features_command(
     import pandas as pd
     from .core import orient
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
@@ -373,7 +380,7 @@ def project_features_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     A, labels, _ = orient(X, cluster=cluster)
     df = pd.DataFrame({
         "feature": labels,
@@ -417,7 +424,7 @@ def project_stats_command(
     from .distance import listwise_stats, pairwise_stats
     from .io import write_stats
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
@@ -426,7 +433,7 @@ def project_stats_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     A, labels, _ = orient(X, cluster=cluster)
     n_rows, n_obj = A.shape
     if n_rows < min_n:
@@ -491,7 +498,7 @@ def count_edges_command(
     import pandas as pd
     from .core import count_edges, orient
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     _ann = None
     if metadata:
@@ -500,7 +507,7 @@ def count_edges_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     A, labels, _ = orient(X, cluster=cluster)
     cat = pd.read_csv(catalogue)
     members = [m.split(";") for m in cat["members"]]
@@ -568,12 +575,12 @@ def heatmap_command(
     if method == "kmeans" and not k:
         raise typer.BadParameter("--method kmeans needs --k")
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, "columns",
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, "columns",
               log2, feature_map, feature_key, feature_label, shared_features)
 
     # Annotations first: both the adjustment and the annotation strips need them.
     ann = read_metadata(metadata) if metadata else None
-    X = _apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
 
     if annotate:
         if metadata:
@@ -651,7 +658,7 @@ def diagnose_command(
     from .io import read_metadata
     from .somascan import read_somascan
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, "columns",
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, "columns",
               log2, feature_map, feature_key, feature_label, shared_features)
 
     # Annotations first: adjustment needs them, and so does the association test.
@@ -662,7 +669,7 @@ def diagnose_command(
     else:
         raise typer.BadParameter("diagnose needs --metadata, or the SomaScan --samples file")
 
-    X = _apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
 
     if annotate:
         cols = [c.strip() for c in annotate.split(",")]
@@ -735,7 +742,7 @@ def apply_edges_command(
     """
     from .apply import apply_edges
 
-    X = _load(matrix, rfu, samples, somamers, top_variable, cluster,
+    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
               log2, feature_map, feature_key, feature_label, shared_features)
     # The same correction every other command applies. Without it this step measures
     # the federated clusters against uncorrected data while the catalogue was built
@@ -747,7 +754,7 @@ def apply_edges_command(
     elif samples:
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = _apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
     out = apply_edges(X, federated_edges, method_dist=dist, method_hclust=linkage,
                       nboot=n_boot, seed=seed, alpha=alpha, cluster=cluster)
 
@@ -884,3 +891,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+_load = load_inputs                  # private aliases, kept for older call sites
+_apply_adjust = apply_adjust
