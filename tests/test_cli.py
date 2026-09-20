@@ -29,7 +29,6 @@ def plain(result) -> str:
 
 EXPECTED_COMMANDS = [
     "cluster",
-    "kmeans",
     "project-features",
     "project-stats",
     "count-edges",

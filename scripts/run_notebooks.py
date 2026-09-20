@@ -13,7 +13,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 failed = False
 HOME = Path.cwd()
-for nb_path in sorted(Path("ipynb").glob("*.ipynb")):
+# A directory can be given, so the archived set can be run without being part of the
+# default sweep: `python scripts/run_notebooks.py archive/ipynb`
+WHERE = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("ipynb")
+for nb_path in sorted(WHERE.glob("*.ipynb")):
     os.chdir(HOME)          # a notebook that chdirs must not strand the next one
     cells = [c for c in json.loads(nb_path.read_text())["cells"] if c["cell_type"] == "code"]
     ns = {"__name__": "__main__"}

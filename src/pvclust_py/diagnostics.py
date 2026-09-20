@@ -57,7 +57,7 @@ def cluster_labels(result, k: Optional[int] = None, alpha: float = 0.95) -> pd.S
     """One cluster label per object, for testing against annotations.
 
     Args:
-        result: a pvclust or kmeans_pv result.
+        result: a pvclust result.
         k: cut the dendrogram into this many groups. Ignored for k-means, which
             already has its groups. Defaults to the number of clusters pvpick keeps
             at ``alpha`` (minimum 2), so the test uses the clusters you would report.
@@ -70,13 +70,6 @@ def cluster_labels(result, k: Optional[int] = None, alpha: float = 0.95) -> pd.S
 
     from .core import pvpick
 
-    if result.is_kmeans:              # k-means: the groups ARE the assignment, and
-                                     # its linkage is over centroids, not objects
-        out = {}
-        for i, e in enumerate(result.edges):
-            for m in e["members"]:
-                out[m] = i
-        return pd.Series(out, name="cluster")
 
     if k is None:
         k = max(2, len(pvpick(result, alpha)))

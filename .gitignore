@@ -51,5 +51,6 @@ federated_*.json
 *_abundance.csv
 *_metadata.csv
 
-# Notebook 3/4 working directory
-/sle-run/
+# Notebook working directory -- created wherever the notebook is run from
+sle-run/
+.ipynb_checkpoints/

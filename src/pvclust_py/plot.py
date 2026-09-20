@@ -175,40 +175,24 @@ def _support_ordered(result, sort_by_support, how: str = "mean"):
     heatmap readable across its width. ``how="max"`` only guarantees the single best
     cluster comes first and leaves the rest scattered, so it is not the default.
     """
-    if not sort_by_support or result.is_kmeans or not result.linkage.size:
+    if not sort_by_support or not result.linkage.size:
         return result.linkage
     from .hclust import rotate_by_support
     return rotate_by_support(result.linkage, result.edges, key=sort_by_support, how=how)
 
+
 def _order_and_blocks(result, labels, sort_by_support=None):
     """Leaf order and cluster blocks for one axis of the heatmap.
 
-    A pvclust result orders by its dendrogram, optionally rotated so better-supported
-    subtrees come first. A k-means result orders by cluster, laid out in the order its
-    CENTROID dendrogram implies, so neighbouring blocks are the most similar clusters
-    rather than merely the largest.
+    Orders by the dendrogram, optionally rotated so better-supported subtrees come
+    first.
     """
     if result is None:
         return list(labels), None, None
-    if not result.is_kmeans:                                   # hierarchical
-        from scipy.cluster.hierarchy import dendrogram as sd
-        dd = sd(_support_ordered(result, sort_by_support),
-                labels=result.labels, no_plot=True)
-        return list(dd["ivl"]), result, dd
-    # k-means: lay the clusters out in the order its CENTROID dendrogram implies, so
-    # neighbouring blocks are the most similar clusters rather than merely the largest.
     from scipy.cluster.hierarchy import dendrogram as sd
-    if result.linkage.size:
-        leaf_order = sd(result.linkage, no_plot=True)["leaves"]
-    else:
-        leaf_order = sorted(range(len(result.edges)),
-                            key=lambda i: -result.edges[i]["n_members"])
-    order, blocks = [], []
-    for idx in leaf_order:
-        e = result.edges[idx]
-        blocks.append((len(order), len(order) + e["n_members"], e))
-        order.extend(e["members"])
-    return order, result, blocks
+    dd = sd(_support_ordered(result, sort_by_support),
+            labels=result.labels, no_plot=True)
+    return list(dd["ivl"]), result, dd
 
 
 def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float = 0.95,
@@ -219,11 +203,11 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
 
     Args:
         matrix: DataFrame, rows x columns, as clustered.
-        row_result, col_result: results for each axis. Either may be a
-            :func:`~pvclust_py.core.pvclust` result (drawn as a dendrogram with red
-            boxes on the significant clusters) or a
-            :func:`~pvclust_py.core.kmeans_pv` result (drawn as a coloured cluster
-            bar, since k-means has no tree). Omit one to leave that axis unordered.
+        row_result, col_result: a :func:`~pvclust_py.core.pvclust` result per axis,
+            drawn as a dendrogram with red boxes on the significant clusters. Omit one
+            to leave that axis unordered. A flat partition has no tree to draw: order
+            the matrix by cluster and pass annotations instead, which is what
+            ``kmeans-py`` does.
         row_annotations: DataFrame indexed like the rows -- one coloured strip per
             column. **This is how you check for batch effects**: annotate samples with
             PlateId / Batch / ScannerID and look at whether the clustering follows
@@ -295,7 +279,10 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
     ax.set_xticks(range(M.shape[1])) if M.shape[1] <= max_labels else ax.set_xticks([])
     ax.set_yticks(range(M.shape[0])) if M.shape[0] <= max_labels else ax.set_yticks([])
     if M.shape[1] <= max_labels:
+        # Names at the TOP, under the column dendrogram, so a branch and its name can
+        # be read together instead of being separated by hundreds of rows.
         ax.set_xticklabels(col_order, rotation=90, fontsize=6)
+        ax.xaxis.set_ticks_position("top")
     if M.shape[0] <= max_labels:
         ax.set_yticklabels(row_order, fontsize=6)
     ax.set_xlabel(f"{M.shape[1]} columns" + ("" if M.shape[1] <= max_labels else " (labels suppressed)"))
@@ -326,60 +313,26 @@ def _axis_marker(ax, result, extra, alpha, n, horizontal, sort_by_support=None):
     for side in ("top", "right", "bottom", "left"):
         ax.spines[side].set_visible(False)
 
-    if not result.is_kmeans:                      # hierarchical: draw the tree
-        sd(_support_ordered(result, sort_by_support), ax=ax, color_threshold=0,
-           above_threshold_color="#555555", no_labels=True,
-           orientation="top" if horizontal else "left")
-        picked = pvpick(result, alpha)
-        pos = {lab: 5.0 + 10.0 * i for i, lab in enumerate(
-            sd(_support_ordered(result, sort_by_support), labels=result.labels,
-               no_plot=True)["ivl"])}
-        lim = ax.get_ylim()[1] if horizontal else ax.get_xlim()[0]
-        for e in picked:
-            xs = [pos[m] for m in e["members"] if m in pos]
-            if not xs:
-                continue
-            lo, hi = min(xs) - 4, max(xs) + 4
-            if horizontal:
-                ax.add_patch(Rectangle((lo, 0), hi - lo, lim, fill=False,
-                                       edgecolor=AU_COLOUR, lw=1.2))
-            else:
-                ax.add_patch(Rectangle((lim, lo), -lim, hi - lo, fill=False,
-                                       edgecolor=AU_COLOUR, lw=1.2))
-        ax.set_title(f"{len(picked)} clusters AU≥{alpha}", fontsize=8) if horizontal else None
-    else:                                         # k-means: blocks + centroid tree
-        cmap = plt.get_cmap("tab20")
-        if horizontal and result.linkage.size:
-            # The centroid dendrogram, stretched so each leaf sits over its block.
-            from scipy.cluster.hierarchy import dendrogram as sd
-            dd = sd(result.linkage, no_plot=True)
-            centres = {leaf: (lo + hi) / 2 for leaf, (lo, hi, _) in
-                       zip(dd["leaves"], extra)}
-            hmax = float(result.linkage[:, 2].max()) or 1.0
-            for xs, ys in zip(dd["icoord"], dd["dcoord"]):
-                # scipy lays leaves at 5, 15, 25...; map those onto block centres
-                mapped = [centres.get(dd["leaves"][int((x - 5) // 10)], x)
-                          if (x - 5) % 10 == 0 else None for x in xs]
-                if any(m is None for m in mapped):
-                    lo_i, hi_i = sorted([xs[0], xs[-1]])
-                    mapped = [np.interp(x, [lo_i, hi_i],
-                                        [mapped[0] or lo_i, mapped[-1] or hi_i])
-                              for x in xs]
-                ax.plot(mapped, [1.15 + 0.5 * y / hmax for y in ys],
-                        color="#555555", lw=1)
-        for j, (lo, hi, e) in enumerate(extra):
-            colour = cmap(j % 20)
-            if horizontal:
-                ax.add_patch(Rectangle((lo, 0), hi - lo, 1, color=colour))
-                ax.text((lo + hi) / 2, 1.15, f"AU {e['au']:.2f}", fontsize=6,
-                        ha="center", color=AU_COLOUR)
-            else:
-                ax.add_patch(Rectangle((0, lo), 1, hi - lo, color=colour))
+    sd(_support_ordered(result, sort_by_support), ax=ax, color_threshold=0,
+       above_threshold_color="#555555", no_labels=True,
+       orientation="top" if horizontal else "left")
+    picked = pvpick(result, alpha)
+    pos = {lab: 5.0 + 10.0 * i for i, lab in enumerate(
+        sd(_support_ordered(result, sort_by_support), labels=result.labels,
+           no_plot=True)["ivl"])}
+    lim = ax.get_ylim()[1] if horizontal else ax.get_xlim()[0]
+    for e in picked:
+        xs = [pos[m] for m in e["members"] if m in pos]
+        if not xs:
+            continue
+        lo, hi = min(xs) - 4, max(xs) + 4
         if horizontal:
-            ax.set_xlim(0, n); ax.set_ylim(0, 1.8 if result.linkage.size else 1.4)
-            ax.set_title(f"k-means, k={len(extra)} (tree over centroids)", fontsize=8)
+            ax.add_patch(Rectangle((lo, 0), hi - lo, lim, fill=False,
+                                   edgecolor=AU_COLOUR, lw=1.2))
         else:
-            ax.set_ylim(n, 0); ax.set_xlim(0, 1)
+            ax.add_patch(Rectangle((lim, lo), -lim, hi - lo, fill=False,
+                                   edgecolor=AU_COLOUR, lw=1.2))
+    ax.set_title(f"{len(picked)} clusters AU≥{alpha}", fontsize=8) if horizontal else None
 
 
 _MISSING = {"NA", "nan", "NaN", "None", "", "<NA>"}
@@ -402,14 +355,28 @@ def _annotation_strip(ax, ann, horizontal):
     grey = (0.88, 0.88, 0.88)
     rows, key, k = [], [], 0
     for col in ann.columns:
-        s = ann[col].astype(str)
-        levels = sorted({v for v in s.unique() if v not in _MISSING})
+        raw = ann[col]
+        numeric = pd.to_numeric(raw, errors="coerce")
+        # A continuous variable drawn with one colour per distinct value is noise: C3
+        # over 262 samples has 105 distinct values, so the strip carries no readable
+        # signal and the legend is 105 entries long. Render it as a gradient instead,
+        # which is what a lab value actually is.
+        if numeric.notna().sum() >= max(3, 0.5 * len(raw)) and numeric.nunique() > 12:
+            lo, hi = float(numeric.min()), float(numeric.max())
+            span = (hi - lo) or 1.0
+            cmap = plt.get_cmap("viridis")
+            rows.append([grey if pd.isna(v) else cmap((float(v) - lo) / span)[:3]
+                         for v in numeric])
+            key.append((f"{col} ({lo:g}\u2013{hi:g})", []))
+            continue
+        s_col = raw.astype(str)
+        levels = sorted({v for v in s_col.unique() if v not in _MISSING})
         colours = {}
         for lv in levels:
             colours[lv] = palette[k % len(palette)]
             k += 1
         key.append((col, [(lv, colours[lv]) for lv in levels]))
-        rows.append([colours.get(v, grey) for v in s])
+        rows.append([colours.get(v, grey) for v in s_col])
     A = np.array(rows, dtype=float)                       # (variables, items, RGB)
     ax.imshow(A if horizontal else A.transpose(1, 0, 2), aspect="auto",
               interpolation="nearest")
@@ -436,10 +403,10 @@ def _annotation_key(fig, keys, max_levels: int = 12):
 
     handles, labels = [], []
     for col, levels in keys:
-        if not levels:
-            continue
         handles.append(Line2D([], [], linestyle="none"))
         labels.append(f"$\\bf{{{col.replace('_', chr(92) + '_')}}}$")
+        if not levels:
+            continue                      # continuous: the range is in the header
         if len(levels) > max_levels:
             handles.append(Line2D([], [], linestyle="none"))
             labels.append(f"  {len(levels)} levels, see hover in the HTML")

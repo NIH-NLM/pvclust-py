@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvclust_py.core import kmeans_pv, pvclust
+from pvclust_py.core import pvclust
 from pvclust_py.datasets import load_lung
 from pvclust_py.diagnostics import _cramers_v, association, cluster_labels, report
 
@@ -27,14 +27,6 @@ def test_cluster_labels_cuts_a_dendrogram_into_k_groups():
     labels = cluster_labels(res, k=3)
     assert labels.nunique() == 3
     assert set(labels.index) == set(res.labels)
-
-
-def test_cluster_labels_uses_kmeans_groups_directly():
-    """k-means has no tree to cut -- its clusters are already the assignment."""
-    res = kmeans_pv(_tiny(), k=4, nboot=10, seed=1)
-    labels = cluster_labels(res)
-    assert labels.nunique() == 4
-    assert len(labels) == _tiny().shape[1]
 
 
 def test_cluster_labels_defaults_to_the_clusters_you_would_report():
