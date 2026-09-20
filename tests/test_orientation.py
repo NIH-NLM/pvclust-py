@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvclust_py.core import kmeans_pv, orient, pvclust
+from pvclust_py.core import orient, pvclust
 from pvclust_py.datasets import load_lung
 
 
@@ -98,12 +98,3 @@ def test_cluster_rows_matches_passing_the_transpose_by_hand():
     np.testing.assert_array_equal(auto.count, manual.count)
 
 
-# ------------------------------------------------------------------ kmeans_pv
-def test_kmeans_respects_the_axis():
-    df = _df()
-    cols = kmeans_pv(df, k=3, nboot=10, seed=1)
-    rows = kmeans_pv(df, k=3, cluster="rows", nboot=10, seed=1)
-
-    assert set().union(*(set(e["members"]) for e in cols.edges)) == {str(c) for c in df.columns}
-    assert set().union(*(set(e["members"]) for e in rows.edges)) == {str(i) for i in df.index}
-    assert cols.cluster == "columns" and rows.cluster == "rows"

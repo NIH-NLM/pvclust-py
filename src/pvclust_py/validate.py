@@ -96,7 +96,7 @@ def cocluster(result, groups: Dict[str, List[str]], *, alpha: float = 0.95,
     need to gather it.
 
     Args:
-        result: a pvclust or kmeans_pv result.
+        result: a pvclust result.
         groups: from :func:`reagent_groups`, or any external grouping.
         n_permutations: null comparison -- how tight would a random group of the same
             size be? Reported as ``p_value``.

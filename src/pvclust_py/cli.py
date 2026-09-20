@@ -5,7 +5,6 @@ A single typer app, one thin wrapper per single-function step, mirroring
 ``oadr_cpep.cli``::
 
   project    : cluster                 (hierarchical clustering with AU p-values)
-               kmeans                  (k-means, AU from the same bootstrap)
                project-features        (this project's vocabulary + summary)
                project-stats           (sufficient statistics -- exact-mode payload)
                count-edges             (counts against a shared catalogue -- pass 2)
@@ -71,8 +70,16 @@ _RFU = typer.Option(None, "--rfu", help="[SomaScan adapter] headerless RFU matri
 _SAMPLES = typer.Option(None, "--samples", help="[SomaScan adapter] sample annotation, one row per RFU row")
 _SOMAMERS = typer.Option(None, "--somamers", help="[SomaScan adapter] SOMAmer annotation, one row per RFU column")
 _CLUSTER = typer.Option("columns", "--cluster", help="Which axis to cluster: columns | rows")
-_DIST = typer.Option("correlation", "--dist", help="correlation | abscor | uncentered | euclidean | minkowski")
-_LINK = typer.Option("average", "--linkage", help="hclust method: average | complete | ward.D2 | ...")
+# The CLI defaults to minkowski + ward.D2, the pairing carried over from
+# microarray and RNA-seq work. In pvclust, minkowski means p=2 -- euclidean -- because
+# dist.pvclust never forwards p to R's dist(); verified against R at max difference
+# 0.0. It also pools exactly under federation. The LIBRARY functions
+# (pvclust, distance, linkage) keep R pvclust's own defaults of correlation and
+# average, because those exist to reproduce R and must not drift from it.
+_DIST = typer.Option("minkowski", "--dist",
+                     help="correlation | abscor | uncentered | euclidean | minkowski")
+_LINK = typer.Option("ward.D2", "--linkage",
+                     help="hclust method: ward.D2 | average | complete | ...")
 _NBOOT = typer.Option(1000, "--n-boot", help="Bootstrap replicates per scale")
 _SEED = typer.Option(42, "--seed", help="Random seed")
 _PLOT = typer.Option(False, "--plot", help="Also draw the figure as .png, .svg and interactive .html")
@@ -284,69 +291,6 @@ def cluster_command(
         typer.echo(f"  wrote {project}_dendrogram.(png|svg|html)")
 
 
-@app.command("kmeans")
-def kmeans_command(
-    project: str = typer.Option(..., "--project", help="Project/cohort id"),
-    k: int = typer.Option(..., "--k", help="Number of clusters"),
-    matrix: Optional[Path] = _MATRIX,
-    rfu: Optional[Path] = _RFU,
-    samples: Optional[Path] = _SAMPLES,
-    somamers: Optional[Path] = _SOMAMERS,
-    cluster: str = _CLUSTER,
-    top_variable: Optional[int] = _TOPVAR,
-    shared_features: Optional[Path] = _SHARED,
-    metadata: Optional[Path] = _METADATA,
-    log2: bool = _LOG2,
-    feature_map: Optional[Path] = _FEATMAP,
-    feature_key: str = _FEATKEY,
-    feature_label: str = _FEATLABEL,
-    adjust: str = _ADJUST,
-    batch_col: Optional[str] = _BATCHCOL,
-    protect: Optional[str] = _PROTECT,
-    adjust_report: bool = _ADJREPORT,
-    n_boot: int = _NBOOT,
-    seed: int = _SEED,
-    alpha: float = typer.Option(0.95, "--alpha", help="AU threshold"),
-    plot: bool = _PLOT,
-    jaccard: Optional[float] = typer.Option(
-        None, "--jaccard",
-        help="Relax exact matching to this Jaccard similarity. Needed above a few "
-             "hundred objects, but changes the estimand -- report it as stability, "
-             "not as an AU p-value."),
-):
-    """k-means clustering, with AU p-values from the same multiscale bootstrap."""
-    from .core import kmeans_pv
-    from .io import write_counts, write_edges, write_project_json
-
-    X = load_inputs(matrix, rfu, samples, somamers, top_variable, cluster,
-              log2, feature_map, feature_key, feature_label, shared_features)
-    _ann = None
-    if metadata:
-        from .io import read_metadata as _rm
-        _ann = _rm(metadata)
-    elif samples:
-        from .somascan import read_somascan as _rs
-        _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
-    X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
-    res = kmeans_pv(X, k=k, cluster=cluster, nboot=n_boot, seed=seed, jaccard=jaccard)
-
-    write_edges(res, f"{project}_kmeans{k}_edges.csv")
-    write_counts(res, f"{project}_kmeans{k}_counts.csv", project,
-                 n=X.shape[0] if cluster == "columns" else X.shape[1])
-    if plot:
-        from .plot import dendrogram
-        # The tree is over the k CENTROIDS -- it shows how the clusters relate to one
-        # another. Its leaves are clusters, not the original objects.
-        dendrogram(res, f"{project}_kmeans{k}_dendrogram", alpha=alpha,
-                   label_nodes=False,
-                   title=f"{project} — k-means k={k}, dendrogram over cluster centroids")
-        typer.echo(f"  wrote {project}_kmeans{k}_dendrogram.(png|svg|html)")
-
-    typer.echo(f"{project}: k={k}, AU per cluster -> {project}_kmeans{k}_edges.csv")
-    for e in sorted(res.edges, key=lambda e: -e["au"]):
-        typer.echo(f"    AU={e['au']:.3f} BP={e['bp']:.3f} n={e['n_members']}")
-
-
 @app.command("project-features")
 def project_features_command(
     project: str = typer.Option(..., "--project", help="Project/cohort id"),
@@ -480,13 +424,6 @@ def count_edges_command(
     adjust_report: bool = _ADJREPORT,
     dist: str = _DIST,
     linkage: str = _LINK,
-    method: str = typer.Option("hclust", "--method",
-        help="How each replicate is clustered: hclust | kmeans. MUST match how the "
-             "catalogue was built, or every project is answering a different question."),
-    k: Optional[int] = typer.Option(None, "--k", help="Clusters per replicate, for --method kmeans"),
-    jaccard: Optional[float] = typer.Option(None, "--jaccard",
-        help="Relaxed matching for kmeans (0.75 is conventional). Effectively required "
-             "there: exact k-means matching collapses to zero above a few dozen objects."),
     n_boot: int = _NBOOT,
     seed: int = _SEED,
 ):
@@ -514,7 +451,7 @@ def count_edges_command(
 
     counts, r_eff, nboot_vec, na = count_edges(
         A, members, labels, method_dist=dist, method_hclust=linkage,
-        method=method, k=k, jaccard=jaccard, nboot=n_boot, seed=seed)
+        nboot=n_boot, seed=seed)
 
     pd.DataFrame([
         {"project": project, "edge_id": cat["edge_id"].iloc[i], "r": float(r_eff[j]),
@@ -542,14 +479,11 @@ def heatmap_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
-    method: str = typer.Option("pvclust", "--method", help="pvclust | kmeans"),
-    k: Optional[int] = typer.Option(None, "--k", help="Clusters per axis, for --method kmeans"),
     dist: str = _DIST,
     linkage: str = _LINK,
     n_boot: int = _NBOOT,
     seed: int = _SEED,
     alpha: float = typer.Option(0.95, "--alpha", help="AU threshold for the red boxes"),
-    jaccard: Optional[float] = typer.Option(None, "--jaccard", help="Relaxed matching for k-means"),
     annotate: Optional[str] = _ANNOTATE,
     metadata: Optional[Path] = _METADATA,
     max_rows: int = typer.Option(80, "--max-rows", help="Subsample rows above this, to keep the figure legible"),
@@ -565,15 +499,11 @@ def heatmap_command(
     rather than independent, so its AU values are anti-conservative. It is the right
     figure to look at; just do not quote the row p-values like the column ones.
     """
-    from .core import kmeans_pv, pvclust
+    from .core import pvclust
     from .io import read_metadata
     from .somascan import read_somascan
     from .plot import heatmap
 
-    if method not in ("pvclust", "kmeans"):
-        raise typer.BadParameter("--method must be pvclust or kmeans")
-    if method == "kmeans" and not k:
-        raise typer.BadParameter("--method kmeans needs --k")
 
     X = load_inputs(matrix, rfu, samples, somamers, top_variable, "columns",
               log2, feature_map, feature_key, feature_label, shared_features)
@@ -602,18 +532,14 @@ def heatmap_command(
     if ann is not None:
         ann = ann.loc[X.index]
 
-    if method == "pvclust":
-        kw = dict(method_dist=dist, method_hclust=linkage, nboot=n_boot, seed=seed)
-        cols_res = pvclust(X, **kw)
-        rows_res = pvclust(X, cluster="rows", **kw)
-    else:
-        cols_res = kmeans_pv(X, k=k, nboot=n_boot, seed=seed, jaccard=jaccard)
-        rows_res = kmeans_pv(X, k=k, cluster="rows", nboot=n_boot, seed=seed, jaccard=jaccard)
+    kw = dict(method_dist=dist, method_hclust=linkage, nboot=n_boot, seed=seed)
+    cols_res = pvclust(X, **kw)
+    rows_res = pvclust(X, cluster="rows", **kw)
 
-    base = f"{project}_heatmap_{method}"
+    base = f"{project}_heatmap_pvclust"
     heatmap(X, base, row_result=rows_res, col_result=cols_res, alpha=alpha,
             row_annotations=ann, max_labels=max_labels,
-            title=f"{project} — {method} ({X.shape[0]} rows x {X.shape[1]} columns)")
+            title=f"{project} — pvclust ({X.shape[0]} rows x {X.shape[1]} columns)")
     typer.echo(f"{project}: wrote {base}.(png|svg|html)")
 
 
@@ -824,12 +750,6 @@ def aggregate_trees_command(
     dist: str = _DIST,
     linkage: str = _LINK,
     alpha: float = typer.Option(0.95, "--alpha", help="AU threshold for the consensus set"),
-    partition: str = typer.Option("pvclust", "--partition",
-        help="How to build the catalogue from the pooled distance matrix: pvclust "
-             "(a dendrogram; 'hclust' is accepted as a synonym) or kmeans (a flat "
-             "k-medoids partition, needs --k). The choice is stamped into the output "
-             "names, so the two can be run side by side without overwriting"),
-    k: Optional[int] = typer.Option(None, "--k", help="Clusters, for --partition kmeans"),
 ):
     """Combine per-project artifacts into the federated tree and AU p-values.
 
@@ -846,7 +766,6 @@ def aggregate_trees_command(
     if not stats and not counts:
         raise typer.BadParameter("give --stats (exact mode) and/or --counts (counts mode)")
 
-    label = "kmeans" if partition == "kmeans" else "pvclust"
 
     names = [l for l in Path(labels).read_text().splitlines() if l]
     catalogue = None
@@ -854,22 +773,13 @@ def aggregate_trees_command(
     if stats:
         D, Z, catalogue = federated_tree([read_stats(s) for s in stats], names,
                                          method_dist=dist, method_hclust=linkage)
-        if partition == "kmeans":
-            if not k:
-                raise typer.BadParameter("--partition kmeans needs --k")
-            from .aggregate import federated_kmeans
-            catalogue = federated_kmeans(D, names, k=k)
-            typer.echo(f"  k-medoids partition on the pooled distance matrix, k={k}")
-        elif partition not in ("pvclust", "hclust"):
-            raise typer.BadParameter("--partition must be pvclust or kmeans")
-        # The pooled distance does not depend on the partition, so it keeps one name;
-        # the catalogue and the edges do, so they carry the method and the two runs
-        # can sit in one directory without clobbering each other.
+        # The names carry the method so a pvclust catalogue never silently overwrites
+        # a partition written by another tool into the same directory.
         pd.DataFrame(D, index=names, columns=names).to_csv("federated_distance.csv")
         pd.DataFrame([{**e, "members": ";".join(e["members"])} for e in catalogue]
-                     ).to_csv(f"federated_{label}_catalogue.csv", index=False)
+                     ).to_csv("federated_pvclust_catalogue.csv", index=False)
         typer.echo(f"pooled {len(stats)} projects -> federated_distance.csv, "
-                   f"federated_{label}_catalogue.csv ({len(catalogue)} clusters)")
+                   f"federated_pvclust_catalogue.csv ({len(catalogue)} clusters)")
 
     if counts:
         from .io import counts_from_json
@@ -878,10 +788,10 @@ def aggregate_trees_command(
         frames = ([counts_from_json(js)] if js else []) + [pd.read_csv(c) for c in cs]
         pooled = pool_counts(frames)
         edges = federated_edges(pooled, catalogue)
-        edges.to_csv(f"federated_{label}_edges.csv", index=False)
+        edges.to_csv("federated_pvclust_edges.csv", index=False)
         cons = consensus_clusters(edges, alpha=alpha)
         typer.echo(f"pooled counts from {len(counts)} projects across "
-                   f"{pooled['r'].nunique()} scales -> federated_{label}_edges.csv")
+                   f"{pooled['r'].nunique()} scales -> federated_pvclust_edges.csv")
         typer.echo(f"  {len(cons)} clusters at AU >= {alpha}")
 
 

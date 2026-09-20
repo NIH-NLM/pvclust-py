@@ -108,28 +108,6 @@ Cost grows with the **square** of the analyte count: ~7s for 100 analytes at
 `--n-boot 1000`, ~4 min for 1,000, hours for a full panel. `--top-variable` is the
 knob.
 
-### 3. k-means, same p-values
-
-```bash
-pvclust-py kmeans --project SLE --k 5 \
-    --matrix data/SLE/abundance.csv --log2 \
-    --feature-map data/SLE/feature_metadata.txt --feature-label GeneSymbol \
-    --metadata data/SLE/sample-metadata.csv \
-    --adjust combat --batch-col Batch --top-variable 60 \
-    --n-boot 1000 --jaccard 0.75 --plot
-```
-
-`msfit` never asks where a cluster came from, only whether it is present or absent in
-each bootstrap replicate — so k-means gets AU from identical machinery. Its dendrogram
-is over the k **centroids**: it shows how the clusters relate, and its leaves are
-clusters, not analytes.
-
-**`--jaccard 0.75` is effectively required.** Exact member-set matching essentially
-never recovers a k-means cluster above a few dozen objects (measured: max BP 0.83 at
-20 objects, 0.20 at 50, **0.00 at 150**). Jaccard counts a cluster as recovered when
-the overlap is close enough. It changes the estimand — the result is cluster
-stability, not the published AU *p*-value — so say which you used.
-
 ### 4. Heatmaps
 
 ```bash
@@ -138,10 +116,11 @@ pvclust-py heatmap --project SLE --method pvclust \
     --feature-map data/SLE/feature_metadata.txt --feature-label GeneSymbol \
     --metadata data/SLE/sample-metadata.csv --annotate Group,Batch,Sex \
     --adjust combat --batch-col Batch --top-variable 60 --max-rows 60 \
-    --dist minkowski --linkage ward.D2 --n-boot 200
+    --n-boot 200        # minkowski + ward.D2 are the defaults
 ```
 
-For k-means, swap in `--method kmeans --k 5 --jaccard 0.75`.
+Both axes are clustered, always: the objects across the top and the samples down the
+side, each with its own AU boxes.
 
 Dendrograms on both axes with the AU boxes, z-scored, annotation strips down the side.
 Keep `--annotate Batch` after correcting: the strips should now look mixed rather than
@@ -191,9 +170,9 @@ pvclust-py apply-edges --project cohortB --matrix cohortB.csv --log2 \
 
 Done correctly, every cluster is measured by every project and `federated_pvclust_edges.csv`
 carries an `n_projects` column; the aggregator **warns** when any cluster was measured
-by fewer than all. For a flat k-medoids partition instead of a dendrogram, add
-`--partition kmeans --k 5` to the catalogue step and `--method kmeans --k 5
---jaccard 0.75` to `count-edges`.
+by fewer than all. For a flat partition instead of a
+dendrogram, see [kmeans-py](https://github.com/NIH-NLM/kmeans-py), which reads the same
+sufficient statistics.
 
 `apply-edges` reports what joining bought: on the SLE cohorts the smaller one recovers
 only **13 of 59** federated clusters alone, and clusters it scored at AU 0.00 by itself
