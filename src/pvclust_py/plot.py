@@ -279,7 +279,10 @@ def heatmap(matrix, base: str, *, row_result=None, col_result=None, alpha: float
     ax.set_xticks(range(M.shape[1])) if M.shape[1] <= max_labels else ax.set_xticks([])
     ax.set_yticks(range(M.shape[0])) if M.shape[0] <= max_labels else ax.set_yticks([])
     if M.shape[1] <= max_labels:
+        # Names at the TOP, under the column dendrogram, so a branch and its name can
+        # be read together instead of being separated by hundreds of rows.
         ax.set_xticklabels(col_order, rotation=90, fontsize=6)
+        ax.xaxis.set_ticks_position("top")
     if M.shape[0] <= max_labels:
         ax.set_yticklabels(row_order, fontsize=6)
     ax.set_xlabel(f"{M.shape[1]} columns" + ("" if M.shape[1] <= max_labels else " (labels suppressed)"))
@@ -352,14 +355,28 @@ def _annotation_strip(ax, ann, horizontal):
     grey = (0.88, 0.88, 0.88)
     rows, key, k = [], [], 0
     for col in ann.columns:
-        s = ann[col].astype(str)
-        levels = sorted({v for v in s.unique() if v not in _MISSING})
+        raw = ann[col]
+        numeric = pd.to_numeric(raw, errors="coerce")
+        # A continuous variable drawn with one colour per distinct value is noise: C3
+        # over 262 samples has 105 distinct values, so the strip carries no readable
+        # signal and the legend is 105 entries long. Render it as a gradient instead,
+        # which is what a lab value actually is.
+        if numeric.notna().sum() >= max(3, 0.5 * len(raw)) and numeric.nunique() > 12:
+            lo, hi = float(numeric.min()), float(numeric.max())
+            span = (hi - lo) or 1.0
+            cmap = plt.get_cmap("viridis")
+            rows.append([grey if pd.isna(v) else cmap((float(v) - lo) / span)[:3]
+                         for v in numeric])
+            key.append((f"{col} ({lo:g}\u2013{hi:g})", []))
+            continue
+        s_col = raw.astype(str)
+        levels = sorted({v for v in s_col.unique() if v not in _MISSING})
         colours = {}
         for lv in levels:
             colours[lv] = palette[k % len(palette)]
             k += 1
         key.append((col, [(lv, colours[lv]) for lv in levels]))
-        rows.append([colours.get(v, grey) for v in s])
+        rows.append([colours.get(v, grey) for v in s_col])
     A = np.array(rows, dtype=float)                       # (variables, items, RGB)
     ax.imshow(A if horizontal else A.transpose(1, 0, 2), aspect="auto",
               interpolation="nearest")
@@ -386,10 +403,10 @@ def _annotation_key(fig, keys, max_levels: int = 12):
 
     handles, labels = [], []
     for col, levels in keys:
-        if not levels:
-            continue
         handles.append(Line2D([], [], linestyle="none"))
         labels.append(f"$\\bf{{{col.replace('_', chr(92) + '_')}}}$")
+        if not levels:
+            continue                      # continuous: the range is in the header
         if len(levels) > max_levels:
             handles.append(Line2D([], [], linestyle="none"))
             labels.append(f"  {len(levels)} levels, see hover in the HTML")

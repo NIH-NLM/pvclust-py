@@ -45,6 +45,29 @@ _FEATMAP = typer.Option(None, "--feature-map", help="Lookup table renaming matri
 _FEATKEY = typer.Option(None, "--feature-key", help="Feature-map column matching the matrix column names (default: its first column)")
 _FEATLABEL = typer.Option(None, "--feature-label", help="Feature-map column to rename columns to (default: its second column). For the SomaScan adapter, the somamer-file column to label with, e.g. EntrezGeneSymbol")
 _METADATA = typer.Option(None, "--metadata", help="Sample annotations CSV/TSV, indexed by the matrix row ids")
+_SCALE = typer.Option(
+    "none", "--scale",
+    help="Standardise each feature after log2 and batch correction: none | zscore. "
+         "'zscore' subtracts the feature mean and divides by its standard deviation, "
+         "WITHIN this project. Use it for the whole pipeline or none of it: the "
+         "sufficient statistics, the tree built from them and the figure must all see "
+         "the same matrix, or the layout and the support disagree. Standardising "
+         "within a project also removes that project's own offset, which is what makes "
+         "cross-project distances comparable")
+
+
+def apply_scale(X, scale: str):
+    """Standardise features, or not. Applied after log2 and batch correction."""
+    if scale == "none":
+        return X
+    if scale != "zscore":
+        raise typer.BadParameter("--scale must be none or zscore")
+    sd = X.std(ddof=1).replace(0, float("nan"))
+    out = ((X - X.mean()) / sd).fillna(0.0)
+    typer.echo(f"  standardised {X.shape[1]} features (z-score, within project)")
+    return out
+
+
 _ADJUST = typer.Option(
     "none", "--adjust",
     help="Batch correction before clustering: none | linear | combat. 'combat' is "
@@ -252,6 +275,7 @@ def cluster_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     dist: str = _DIST,
     linkage: str = _LINK,
     n_boot: int = _NBOOT,
@@ -273,6 +297,7 @@ def cluster_command(
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
     X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
     res = pvclust(X, cluster=cluster, method_dist=dist, method_hclust=linkage,
                   nboot=n_boot, seed=seed, quiet=False)
 
@@ -310,6 +335,7 @@ def project_features_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
 ):
     """This project's clustering vocabulary, with a per-feature summary."""
     import pandas as pd
@@ -325,6 +351,7 @@ def project_features_command(
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
     X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
     A, labels, _ = orient(X, cluster=cluster)
     df = pd.DataFrame({
         "feature": labels,
@@ -356,6 +383,7 @@ def project_stats_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     dist: str = _DIST,
     min_n: int = typer.Option(20, "--min-n", help="Refuse to emit below this many rows"),
 ):
@@ -378,6 +406,7 @@ def project_stats_command(
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
     X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
     A, labels, _ = orient(X, cluster=cluster)
     n_rows, n_obj = A.shape
     if n_rows < min_n:
@@ -422,6 +451,7 @@ def count_edges_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     dist: str = _DIST,
     linkage: str = _LINK,
     n_boot: int = _NBOOT,
@@ -445,6 +475,7 @@ def count_edges_command(
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
     X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
     A, labels, _ = orient(X, cluster=cluster)
     cat = pd.read_csv(catalogue)
     members = [m.split(";") for m in cat["members"]]
@@ -479,6 +510,7 @@ def heatmap_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     dist: str = _DIST,
     linkage: str = _LINK,
     n_boot: int = _NBOOT,
@@ -489,6 +521,11 @@ def heatmap_command(
     max_rows: int = typer.Option(80, "--max-rows", help="Subsample rows above this, to keep the figure legible"),
     max_labels: int = typer.Option(60, "--max-labels",
         help="Draw tick labels while an axis has at most this many objects"),
+    order_rows: Optional[str] = typer.Option(None, "--order-rows",
+        help="Sort the rows by this metadata column instead of clustering them. The "
+             "row dendrogram is then dropped, because the rows are no longer in tree "
+             "order and drawing one beside them would be a lie. Use it to ask whether "
+             "a known variable explains the column blocks"),
 ):
     """Two-way clustered heatmap: dendrograms on BOTH axes, with the AU boxes.
 
@@ -511,6 +548,7 @@ def heatmap_command(
     # Annotations first: both the adjustment and the annotation strips need them.
     ann = read_metadata(metadata) if metadata else None
     X = apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
 
     if annotate:
         if metadata:
@@ -534,7 +572,20 @@ def heatmap_command(
 
     kw = dict(method_dist=dist, method_hclust=linkage, nboot=n_boot, seed=seed)
     cols_res = pvclust(X, **kw)
-    rows_res = pvclust(X, cluster="rows", **kw)
+    if order_rows:
+        import pandas as pd
+        if ann is None or order_rows not in ann.columns:
+            raise typer.BadParameter(
+                f"--order-rows {order_rows!r} needs --metadata holding that column")
+        key = pd.to_numeric(ann[order_rows], errors="coerce")
+        key = key if key.notna().any() else ann[order_rows].astype(str)
+        idx = key.sort_values(kind="stable", na_position="last").index
+        X = X.loc[idx]
+        ann = ann.loc[idx]
+        rows_res = None
+        typer.echo(f"  rows sorted by {order_rows}; row dendrogram dropped")
+    else:
+        rows_res = pvclust(X, cluster="rows", **kw)
 
     base = f"{project}_heatmap_pvclust"
     heatmap(X, base, row_result=rows_res, col_result=cols_res, alpha=alpha,
@@ -563,8 +614,12 @@ def diagnose_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     technical: Optional[str] = _TECHNICAL,
-    k: int = typer.Option(3, "--k", help="Cut the sample dendrogram into this many clusters"),
+    k: Optional[int] = typer.Option(None, "--k",
+        help="Cut the dendrogram into this many groups. Omit it -- the default -- and "
+             "pvpick decides instead: every cluster clearing --alpha is kept and the "
+             "tree cuts itself. A fixed k is for reproducing someone else's cut"),
     dist: str = _DIST,
     linkage: str = _LINK,
     n_boot: int = _NBOOT,
@@ -596,6 +651,7 @@ def diagnose_command(
         raise typer.BadParameter("diagnose needs --metadata, or the SomaScan --samples file")
 
     X = apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
 
     if annotate:
         cols = [c.strip() for c in annotate.split(",")]
@@ -652,6 +708,7 @@ def apply_edges_command(
     batch_col: Optional[str] = _BATCHCOL,
     protect: Optional[str] = _PROTECT,
     adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
     annotate: Optional[str] = _ANNOTATE,
     plot: bool = _PLOT,
     max_rows: int = typer.Option(60, "--max-rows", help="Subsample rows for legibility"),
@@ -681,6 +738,7 @@ def apply_edges_command(
         from .somascan import read_somascan as _rs
         _ann = _rs(rfu, samples, somamers, somamer_id=feature_label or "SeqId")[1]
     X = apply_adjust(X, _ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
     out = apply_edges(X, federated_edges, method_dist=dist, method_hclust=linkage,
                       nboot=n_boot, seed=seed, alpha=alpha, cluster=cluster)
 
@@ -793,6 +851,163 @@ def aggregate_trees_command(
         typer.echo(f"pooled counts from {len(counts)} projects across "
                    f"{pooled['r'].nunique()} scales -> federated_pvclust_edges.csv")
         typer.echo(f"  {len(cons)} clusters at AU >= {alpha}")
+
+
+@app.command("project-profiles")
+def project_profiles_command(
+    project: str = typer.Option(..., "--project", help="Project/cohort id"),
+    matrix: Optional[Path] = _MATRIX,
+    rfu: Optional[Path] = _RFU,
+    samples: Optional[Path] = _SAMPLES,
+    somamers: Optional[Path] = _SOMAMERS,
+    shared_features: Optional[Path] = _SHARED,
+    metadata: Optional[Path] = _METADATA,
+    log2: bool = _LOG2,
+    feature_map: Optional[Path] = _FEATMAP,
+    feature_key: Optional[str] = _FEATKEY,
+    feature_label: Optional[str] = _FEATLABEL,
+    adjust: str = _ADJUST,
+    batch_col: Optional[str] = _BATCHCOL,
+    protect: Optional[str] = _PROTECT,
+    adjust_report: bool = _ADJREPORT,
+    scale: str = _SCALE,
+    annotate: Optional[str] = _ANNOTATE,
+    dist: str = _DIST,
+    linkage: str = _LINK,
+    n_boot: int = _NBOOT,
+    seed: int = _SEED,
+    alpha: float = typer.Option(0.95, "--alpha",
+        help="AU threshold. Clusters clearing it are kept; the tree cuts itself"),
+    min_cluster: int = typer.Option(10, "--min-cluster",
+        help="Refuse to release if any kept cluster is smaller than this"),
+):
+    """Cluster THIS project's patients with pvclust, and write the releasable summary.
+
+    There is NO k. pvclust and pvpick decide how many clusters there are: every
+    cluster clearing --alpha is kept, and pvpick walks the tree top-down so the kept
+    clusters never overlap. A patient in no cluster clearing the threshold is reported
+    as unassigned rather than forced into one.
+
+    Clustering patients cannot be federated the way clustering features is: projects
+    hold disjoint patients, so there is no shared object vocabulary and a cluster is a
+    set of subject ids. What can cross the boundary is a per-cluster MEAN PROFILE and
+    a member count -- an average over patients, carrying no subject id.
+
+    Note what is being resampled. With patients as the objects, the bootstrap draws
+    FEATURES, and features are co-expressed rather than independent draws, so these AU
+    values are anti-conservative. Real numbers, optimistic ones.
+    """
+    import pandas as pd
+
+    from .core import pvclust, pvpick
+    from .profiles import SuppressedError, project_profiles
+
+    X = load_inputs(matrix, rfu, samples, somamers, None, "rows",
+                    log2, feature_map, feature_key, feature_label, shared_features)
+    ann = None
+    if metadata:
+        from .io import read_metadata as _rm
+        ann = _rm(metadata)
+    X = apply_adjust(X, ann, adjust, batch_col, protect, adjust_report)
+    X = apply_scale(X, scale)
+    if ann is not None:
+        ann = ann.reindex(X.index)
+        if annotate:
+            ann = ann[[c.strip() for c in annotate.split(",")]]
+
+    res = pvclust(X, cluster="rows", method_dist=dist, method_hclust=linkage,
+                  nboot=n_boot, seed=seed, quiet=False)
+    picked = pvpick(res, alpha)
+    if not picked:
+        raise typer.BadParameter(
+            f"no patient cluster reached AU >= {alpha}, so there is nothing to "
+            f"release. Lower --alpha, or accept that this cohort has no supported "
+            f"patient structure.")
+
+    assignment = pd.Series(index=X.index, dtype=object)
+    for i, e in enumerate(picked):
+        assignment.loc[[m for m in e["members"] if m in assignment.index]] = f"c{i}"
+    unassigned = int(assignment.isna().sum())
+    kept = assignment.dropna()
+
+    try:
+        out = project_profiles(X.loc[kept.index], kept, project=project,
+                               min_cluster=min_cluster,
+                               annotations=None if ann is None else ann.loc[kept.index])
+    except SuppressedError as e:
+        raise typer.BadParameter(str(e))
+
+    out["profiles"].to_csv(f"{project}_profiles.csv")
+    out["counts"].to_csv(f"{project}_profile_counts.csv", index=False)
+    assignment.rename("cluster").to_csv(f"{project}_patient_assignment.csv")
+    if out["demographics"] is not None:
+        out["demographics"].to_csv(f"{project}_profile_demographics.csv", index=False)
+
+    typer.echo(f"{project}: pvpick kept {len(picked)} clusters at AU >= {alpha} "
+               f"over {X.shape[0]} patients")
+    typer.echo(f"  sizes {list(out['counts']['n_patients'])}, "
+               f"{unassigned} patients in no supported cluster")
+    typer.echo(f"  wrote {project}_profiles.csv "
+               f"({out['profiles'].shape[0]} profiles x {out['profiles'].shape[1]} "
+               f"features) -- no subject leaves")
+
+
+@app.command("aggregate-profiles")
+def aggregate_profiles_command(
+    profiles: List[Path] = typer.Option(..., "--profiles",
+        help="Per-project profiles CSV from `project-profiles` (repeat)"),
+    counts: List[Path] = typer.Option(..., "--counts",
+        help="Per-project profile counts CSV (repeat)"),
+    dist: str = _DIST,
+    linkage: str = _LINK,
+    n_boot: int = _NBOOT,
+    seed: int = _SEED,
+    alpha: float = typer.Option(0.95, "--alpha",
+        help="AU threshold for calling a correspondence replicated"),
+):
+    """Cluster every project's patient profiles together, and report what replicated.
+
+    Each project's profiles are centred on that project's OWN per-feature mean first.
+    That is not cosmetic. A profile over thousands of proteins is dominated by which
+    proteins are abundant, so any two correlate at 0.98 whether or not they are the
+    same endotype -- on the SLE cohorts every cross-cohort pair fell in 0.91 to 0.99.
+    Centring takes that spread from 0.08 to 1.86. It also removes each project's batch
+    offset at the one point where projects are compared.
+
+    The federated statement is REPLICATION, not a pooled p-value over patients:
+    projects hold disjoint patients, so there is no pooled patient tree and there
+    cannot be one.
+
+    The AU values here are ANTI-CONSERVATIVE. The resampling units are features, and
+    features are co-expressed rather than independent draws, so AU comes out too high.
+    Real numbers, optimistic ones.
+    """
+    import pandas as pd
+
+    from .io import write_edges
+    from .profiles import match_profiles, replication
+
+    frames = [pd.read_csv(f, index_col=0) for f in profiles]
+    cnt = pd.concat([pd.read_csv(c) for c in counts], ignore_index=True)
+
+    result, similarity = match_profiles(frames, method_dist=dist,
+                                        method_hclust=linkage, nboot=n_boot,
+                                        seed=seed, quiet=False)
+    write_edges(result, "federated_profile_edges.csv")
+    similarity.to_csv("federated_profile_similarity.csv")
+    rep = replication(result, cnt, alpha=alpha)
+    rep.to_csv("federated_profile_replication.csv", index=False)
+
+    typer.echo(f"\nmatched {len(frames)} projects over {result.linkage.shape[0] + 1} "
+               f"profiles -> federated_profile_edges.csv")
+    typer.echo(rep.to_string(index=False))
+    typer.echo(f"\n{int(rep['replicated'].sum())} of {len(rep)} clusters replicated "
+               f"at AU >= {alpha}   (AU here is anti-conservative -- see --help)")
+
+    from .plot import dendrogram
+    dendrogram(result, "federated_profiles", alpha=alpha,
+               title="patient clusters across projects (AU is anti-conservative)")
+    typer.echo("  wrote federated_profiles.(png|svg|html)")
 
 
 def main():
